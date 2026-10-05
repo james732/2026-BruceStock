@@ -17,6 +17,7 @@ from googleapiclient.errors import HttpError
 SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
 DEFAULT_RECIPIENT = "Bruce1_Chen@asus.com"
 DEFAULT_REPORT = "analysis.html"
+PARAM_REPORT = "analysis_param.html"
 TOKEN_FILE = "gmail_token.json"
 
 
@@ -73,7 +74,8 @@ def extract_report_scores(report_html: str) -> list[tuple[int, str, str]]:
 
 
 def build_email_body(
-    scores: list[tuple[int, str, str]], modified_time: datetime
+    scores: list[tuple[int, str, str]], modified_time: datetime,
+    report_name: str = DEFAULT_REPORT,
 ) -> str:
     score_lines = [
         f"{rank}. {stock_id} {stock_name}：{score} 分"
@@ -86,7 +88,8 @@ def build_email_body(
             *score_lines,
             "",
             f"報告產生時間：{modified_time:%Y-%m-%d %H:%M:%S}",
-            "完整報告請見附件 analysis.html。",
+            f"完整報告請見附件 {report_name}。",
+            f"可調整評分參數的報告請見附件 {PARAM_REPORT}，請下載後以瀏覽器開啟。",
         ]
     )
 
@@ -127,6 +130,10 @@ def load_credentials(client_secret: Path, token_path: Path, non_interactive: boo
 
 
 def build_message(report_path: Path, recipient: str, subject: str) -> EmailMessage:
+    param_path = report_path.with_name(PARAM_REPORT)
+    if report_path.resolve() == param_path.resolve():
+        raise ValueError("--report must be the main report, not analysis_param.html")
+    param_bytes = param_path.read_bytes()
     modified_time = datetime.fromtimestamp(report_path.stat().st_mtime)
     report_bytes = report_path.read_bytes()
     scores = extract_report_scores(report_bytes.decode("utf-8-sig"))
@@ -134,16 +141,17 @@ def build_message(report_path: Path, recipient: str, subject: str) -> EmailMessa
     message["To"] = recipient
     message["From"] = "me"
     message["Subject"] = subject
-    message.set_content(build_email_body(scores, modified_time))
+    message.set_content(build_email_body(scores, modified_time, report_path.name))
 
-    mime_type, _ = mimetypes.guess_type(report_path.name)
-    main_type, sub_type = (mime_type or "application/octet-stream").split("/", 1)
-    message.add_attachment(
-        report_bytes,
-        maintype=main_type,
-        subtype=sub_type,
-        filename=report_path.name,
-    )
+    for attachment_path, content in ((report_path, report_bytes), (param_path, param_bytes)):
+        mime_type, _ = mimetypes.guess_type(attachment_path.name)
+        main_type, sub_type = (mime_type or "application/octet-stream").split("/", 1)
+        message.add_attachment(
+            content,
+            maintype=main_type,
+            subtype=sub_type,
+            filename=attachment_path.name,
+        )
     return message
 
 
@@ -155,8 +163,8 @@ def send_report(
     token_path: Path,
     non_interactive: bool = False,
 ) -> str:
-    credentials = load_credentials(client_secret, token_path, non_interactive)
     message = build_message(report_path, recipient, subject)
+    credentials = load_credentials(client_secret, token_path, non_interactive)
     raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
 
     with build("gmail", "v1", credentials=credentials) as service:
@@ -176,13 +184,13 @@ def send_report(
 def parse_arguments() -> argparse.Namespace:
     base_dir = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(
-        description="Send analysis.html as an attachment through the Gmail API."
+        description="Send analysis.html and analysis_param.html as attachments through the Gmail API."
     )
     parser.add_argument(
         "--report",
         type=Path,
         default=base_dir / DEFAULT_REPORT,
-        help="Path to the HTML report.",
+        help="Path to the main HTML report; analysis_param.html in the same directory is also required and attached.",
     )
     parser.add_argument(
         "--recipient",

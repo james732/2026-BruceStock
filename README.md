@@ -10,6 +10,8 @@
 
 總覽會顯示股票代碼與個股名稱。點選任一個股資料列，即可在該列下方展開或收合法人買賣、最近四週股價與持股分級，以及近七日個股新聞。
 
+執行時也會在報表同一目錄產生 `analysis_param.html`。用瀏覽器開啟後，可調整六項評分參數（正數加分、負數扣分、0 不計分，每項限 -100 至 100 的整數），分數、顏色與目前排序會即時更新。起始分與上限皆為 100 分；可按「恢復預設」還原，重新整理也會回到預設值。參數調整只影響這個頁面。
+
 ## 執行方式
 
 ```powershell
@@ -45,7 +47,7 @@ API token 依目前專案需求直接寫在 `main.py`。請勿公開分享此檔
 
 ## 平日 20:00 自動寄送
 
-`run_report.bat` 先執行 `uv run main.py`，成功後才執行寄信程式，將 `analysis.html` 附件寄給 `Bruce1_Chen@asus.com`。執行紀錄累加至 `logs\report.log`；成功回傳 0，失敗回傳 1。批次檔會自動切換至專案目錄，並優先使用此電腦已安裝的 uv 路徑。
+`run_report.bat` 先執行 `uv run main.py`，成功後才執行寄信程式，將 `analysis.html` 與 `analysis_param.html` 一起附在同一封信寄給 `Bruce1_Chen@asus.com`。任一報告缺少時不寄出。參數版附件請下載後以瀏覽器開啟。`mail_report.py --report` 若指定其他主報告路徑，會一併附上同目錄的 `analysis_param.html`。執行紀錄累加至 `logs\report.log`；成功回傳 0，失敗回傳 1。批次檔會自動切換至專案目錄，並優先使用此電腦已安裝的 uv 路徑。
 
 首次使用或 Gmail 授權失效時，在 PowerShell 執行下列指令完成授權（不會寄信）：
 

@@ -24,6 +24,7 @@ gmail_token.json
 
 # Generated reports, logs, and downloaded cache data
 analysis.html
+analysis_param.html
 score_*.txt
 logs/
 tdcc_cache/

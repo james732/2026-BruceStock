@@ -23,6 +23,10 @@ if not exist "analysis.html" (
     echo [%DATE% %TIME%] ERROR: analysis.html is missing. Email skipped.
     exit /b 1
 )
+if not exist "analysis_param.html" (
+    echo [%DATE% %TIME%] ERROR: analysis_param.html is missing. Email skipped.
+    exit /b 1
+)
 "%UV_EXE%" run mail_report.py --report analysis.html --recipient Bruce1_Chen@asus.com --non-interactive
 if errorlevel 1 (
     echo [%DATE% %TIME%] ERROR: Email delivery failed.

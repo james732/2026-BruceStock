@@ -5,7 +5,7 @@ import unittest
 from datetime import date
 from pathlib import Path
 
-from test import (
+from main import (
     MA_WINDOWS,
     StockNews,
     WeeklyHolding,
@@ -274,7 +274,7 @@ class AnalysisTests(unittest.TestCase):
         self.assertIn("<h1>台股法人、均線與成交量分析</h1>", report)
         self.assertIn('<span class="stock-code">2330</span>', report)
         self.assertIn('<span class="stock-name">台積電</span>', report)
-        self.assertIn('<td class="relation-above">58(&gt;)</td>', report)
+        self.assertIn('<td class="relation-above" data-sort-value="58.0">58(&gt;)</td>', report)
         self.assertNotIn("<th>關係</th>", report)
         self.assertIn("最近三個交易日法人買賣", report)
         self.assertIn('aria-controls="institution-2330"', report)
@@ -287,7 +287,7 @@ class AnalysisTests(unittest.TestCase):
         self.assertLess(report.index("最近四週股價與持股分級"), report.index("近七日個股新聞"))
         self.assertNotIn("<h2>最近三個交易日法人買賣</h2>", report)
         self.assertEqual(report.count("<table"), 4)
-        self.assertEqual(report.count("<tbody>"), 4)
+        self.assertEqual(report.count("<tbody"), 4)
 
 
 if __name__ == "__main__":

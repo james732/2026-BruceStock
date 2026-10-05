@@ -4,6 +4,7 @@ import argparse
 import csv
 import html
 import io
+import json
 import math
 import re
 import sys
@@ -28,6 +29,14 @@ TDCC_ARCHIVE_CONTENTS_URL = (
 TAIPEI_TIMEZONE = timezone(timedelta(hours=8), name="UTC+08:00")
 LOOKBACK_CALENDAR_DAYS = 180
 MA_WINDOWS = (5, 10, 20, 60)
+SCORE_RULES = (
+    ("ma5", "收盤未高於 5 日均線", -5),
+    ("ma10", "收盤未高於 10 日均線", -10),
+    ("ma20", "收盤低於月線", -20),
+    ("ma60", "收盤低於季線", -30),
+    ("volume", "最近均量未增加", -10),
+    ("institution", "法人連續三個交易日皆為淨買超", 10),
+)
 
 
 @dataclass(frozen=True)
@@ -574,23 +583,10 @@ def safe_news_link(link: str) -> str | None:
     return None
 
 
-def calculate_score(
+def score_conditions(
     analysis: PriceAnalysis,
     institutional_days: Iterable[InstitutionalDay],
-) -> int:
-    """Calculate the overview score described in score_1005.txt."""
-    score = 100
-    if analysis.relations[5] != "above":
-        score -= 5
-    if analysis.relations[10] != "above":
-        score -= 10
-    if analysis.relations[20] == "below":
-        score -= 20
-    if analysis.relations[60] == "below":
-        score -= 30
-    if not analysis.volume_increased:
-        score -= 10
-
+) -> dict[str, bool]:
     recent_days = sorted(
         (
             day
@@ -599,10 +595,23 @@ def calculate_score(
         ),
         key=lambda day: day.trading_date,
     )[-3:]
-    if len(recent_days) == 3 and all(day.total_net > 0 for day in recent_days):
-        score += 10
+    return {
+        "ma5": analysis.relations[5] != "above",
+        "ma10": analysis.relations[10] != "above",
+        "ma20": analysis.relations[20] == "below",
+        "ma60": analysis.relations[60] == "below",
+        "volume": not analysis.volume_increased,
+        "institution": len(recent_days) == 3 and all(day.total_net > 0 for day in recent_days),
+    }
 
-    return min(score, 100)
+
+def calculate_score(
+    analysis: PriceAnalysis,
+    institutional_days: Iterable[InstitutionalDay],
+) -> int:
+    """Calculate the overview score described in score_1005.txt."""
+    conditions = score_conditions(analysis, institutional_days)
+    return min(100, 100 + sum(value for key, _, value in SCORE_RULES if conditions[key]))
 
 
 def render_report(
@@ -612,6 +621,8 @@ def render_report(
     stock_news: list[StockNews],
     stock_names: dict[str, str],
     requested_end_date: str,
+    *,
+    adjustable_scores: bool = False,
 ) -> str:
     relation_symbols = {"above": ">", "below": "<", "equal": "="}
     generated_at = datetime.now(TAIPEI_TIMEZONE).strftime("%Y-%m-%d %H:%M:%S %Z")
@@ -688,8 +699,15 @@ def render_report(
                 ),
             ]
         )
+        conditions_attribute = ""
+        if adjustable_scores:
+            conditions_attribute = 'data-score-conditions="' + html.escape(
+                json.dumps(score_conditions(analysis, institutions_by_stock[analysis.stock_id])),
+                quote=True,
+            ) + '" '
         summary_row = (
             f'<tr class="stock-row" role="button" tabindex="0" aria-expanded="false" '
+            f'{conditions_attribute}'
             f'aria-controls="{details_id}" data-details-id="{details_id}" '
             f'title="展開 {html.escape(stock_label, quote=True)} 詳細資訊">'
             + "".join(cells)
@@ -812,6 +830,65 @@ def render_report(
 </tr>"""
         price_rows.extend([summary_row, detail_row])
 
+    score_description = (
+        "總分以 100 分為上限：收盤未高於 5 日、10 日均線分別扣 5、10 分；"
+        "低於月線、季線分別扣 20、30 分；最近均量未增加扣 10 分；"
+        "法人連續三個交易日皆為淨買超加 10 分。"
+    )
+    score_controls = ""
+    score_script = ""
+    if adjustable_scores:
+        score_description = "總分從 100 分起算，上限為 100 分；依下方評分參數即時計算。"
+        inputs = "".join(
+            f'<label for="score-{key}">{label}'
+            f'<input id="score-{key}" name="{key}" type="number" '
+            f'min="-100" max="100" step="1" value="{value}" required></label>'
+            for key, label, value in SCORE_RULES
+        )
+        score_controls = f"""
+  <section class="note" aria-labelledby="score-heading">
+    <h2 id="score-heading">評分參數</h2>
+    <p>正數加分、負數扣分，0 表示不計分；每項可輸入 -100 至 100 的整數。
+    修改後即時重算並依目前欄位排序。設定僅適用本頁，重新開啟或重新整理將恢復預設。</p>
+    <form id="score-form">
+      <div class="score-inputs">{inputs}</div>
+      <button type="reset">恢復預設</button>
+      <p id="score-status" role="status" aria-live="polite"></p>
+    </form>
+    <noscript>請啟用 JavaScript 才能調整評分；目前顯示預設分數。</noscript>
+  </section>"""
+        score_script = """
+  const scoreForm = document.getElementById("score-form");
+  const scoreInputs = Array.from(scoreForm.querySelectorAll("input"));
+  const scoreStatus = document.getElementById("score-status");
+  function updateScores() {
+    if (!scoreForm.checkValidity()) {
+      scoreStatus.textContent = "請將所有加減分填為 -100 至 100 的整數；目前保留上次有效結果。";
+      return;
+    }
+    const values = Object.fromEntries(scoreInputs.map(input => [input.name, input.valueAsNumber]));
+    overviewBody.querySelectorAll(".stock-row").forEach(row => {
+      const conditions = JSON.parse(row.dataset.scoreConditions);
+      const score = Math.min(100, 100 + Object.entries(values).reduce(
+        (total, [key, value]) => total + (conditions[key] ? value : 0), 0));
+      const cell = row.cells[0];
+      cell.textContent = String(score);
+      cell.dataset.sortValue = String(score);
+      cell.classList.remove("score-high", "score-mid", "score-low");
+      cell.classList.add(score >= 80 ? "score-high" : score < 70 ? "score-low" : "score-mid");
+    });
+    const activeHeader = Array.from(sortableHeaders).find(header => header.hasAttribute("aria-sort"));
+    sortRows(activeHeader, activeHeader.getAttribute("aria-sort"));
+    scoreStatus.textContent = "已依目前參數更新分數與排序。";
+  }
+  scoreForm.addEventListener("submit", event => event.preventDefault());
+  scoreForm.addEventListener("input", updateScores);
+  scoreForm.addEventListener("reset", () => {
+    scoreInputs.forEach(input => { input.value = input.defaultValue; });
+    updateScores();
+  });
+"""
+
     return f"""<!doctype html>
 <html lang="zh-Hant">
 <head>
@@ -847,6 +924,11 @@ def render_report(
     .score-high {{ color: #b42318; }}
     .score-low {{ color: #067647; }}
     .score-mid {{ color: #17202a; }}
+    .score-inputs {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 16px; }}
+    .score-inputs label {{ display: flex; flex-direction: column; gap: 6px; }}
+    .score-inputs input {{ padding: 8px; font: inherit; border: 1px solid #98a2b3; border-radius: 4px; }}
+    .score-inputs input:invalid {{ border-color: #b42318; }}
+    #score-form button {{ padding: 8px 16px; font: inherit; cursor: pointer; }}
     .stock-code {{ font-weight: 750; }}
     .stock-name {{ color: #475467; font-weight: 500; }}
     .toggle-indicator {{ display: inline-block; width: 1.2em; transition: transform 0.15s ease; }}
@@ -888,12 +970,13 @@ def render_report(
     <li>月線採 20 個交易日，季線採 60 個交易日；均線均包含資料最新日，括號內符號表示收盤價相對於均線的關係。</li>
     <li>法人數值為買進減賣出的淨額，單位為張；正數代表淨買超，負數代表淨賣超。</li>
     <li>量能比較使用兩段不重疊區間：最近 10 個交易日與再前 10 個交易日。</li>
-    <li>總分以 100 分為上限：收盤未高於 5 日、10 日均線分別扣 5、10 分；低於月線、季線分別扣 20、30 分；最近均量未增加扣 10 分；法人連續三個交易日皆為淨買超加 10 分。</li>
+    <li>{score_description}</li>
     <li>點選個股資料列，可展開或收合最近三個交易日的法人買賣資訊。</li>
     <li>展開區列出最近 4 個已完成的 TDCC 週次；週漲跌以相鄰兩個集保資料日收盤價計算。</li>
     <li>展開區同時列出查詢截止日往前 7 個日曆日的相關新聞；新聞標題會開啟原始來源。</li>
   </ul>
 
+  {score_controls}
   <h2>均線與成交量總覽</h2>
   <div class="table-wrap">
     <table class="overview-table" id="overview-table">
@@ -936,13 +1019,10 @@ def render_report(
 
   const overviewBody = document.getElementById("overview-body");
   const sortableHeaders = document.querySelectorAll(".overview-table th.sortable");
-  sortableHeaders.forEach((header) => {{
-    header.querySelector(".sort-button").addEventListener("click", () => {{
+  function sortRows(header, direction) {{
       const button = header.querySelector(".sort-button");
       const column = Number(button.dataset.column);
       const type = button.dataset.type;
-      const currentDirection = header.getAttribute("aria-sort");
-      const direction = currentDirection === "ascending" ? "descending" : "ascending";
       const rows = Array.from(overviewBody.querySelectorAll(".stock-row"));
 
       rows.sort((leftRow, rightRow) => {{
@@ -970,8 +1050,14 @@ def render_report(
         const details = document.getElementById(row.dataset.detailsId);
         overviewBody.append(row, details);
       }});
+  }}
+  sortableHeaders.forEach((header) => {{
+    header.querySelector(".sort-button").addEventListener("click", () => {{
+      const direction = header.getAttribute("aria-sort") === "ascending" ? "descending" : "ascending";
+      sortRows(header, direction);
     }});
   }});
+  {score_script}
 </script>
 </body>
 </html>
@@ -1048,7 +1134,7 @@ def parse_arguments() -> argparse.Namespace:
         "--output",
         type=Path,
         default=Path("analysis.html"),
-        help="HTML report output path.",
+        help="HTML report output path; analysis_param.html is also generated in the same directory.",
     )
     return parser.parse_args()
 
@@ -1056,6 +1142,9 @@ def parse_arguments() -> argparse.Namespace:
 def main() -> int:
     args = parse_arguments()
     try:
+        param_output = args.output.with_name("analysis_param.html")
+        if args.output.resolve() == param_output.resolve():
+            raise ValueError("--output must differ from analysis_param.html")
         stock_ids = load_stock_ids(args.target)
         analyses, institutional_days, weekly_holdings, stock_news, stock_names = run_analysis(
             stock_ids,
@@ -1072,11 +1161,22 @@ def main() -> int:
             args.end_date.isoformat(),
         )
         args.output.write_text(report, encoding="utf-8")
+        param_report = render_report(
+            analyses,
+            institutional_days,
+            weekly_holdings,
+            stock_news,
+            stock_names,
+            args.end_date.isoformat(),
+            adjustable_scores=True,
+        )
+        param_output.write_text(param_report, encoding="utf-8")
     except (OSError, ValueError, RuntimeError, requests.RequestException) as error:
         print(f"Analysis failed: {error}", file=sys.stderr)
         return 1
 
     print(f"Report written to {args.output}")
+    print(f"Adjustable report written to {param_output}")
     return 0
 
 
