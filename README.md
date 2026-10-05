@@ -72,7 +72,7 @@ API token 依目前專案需求直接寫在 `main.py`。請勿公開分享此檔
 
 ## 平日 20:00 自動寄送
 
-`run_report.bat` 先執行 `uv run main.py`，成功後才執行寄信程式，將 `analysis.html` 與 `analysis_param.html` 一起附在同一封信寄給 `Bruce1_Chen@asus.com`。任一報告缺少時不寄出。參數版附件請下載後以瀏覽器開啟。`mail_report.py --report` 若指定其他主報告路徑，會一併附上同目錄的 `analysis_param.html`。執行紀錄累加至 `logs\report.log`；成功回傳 0，失敗回傳 1。批次檔會自動切換至專案目錄，並優先使用此電腦已安裝的 uv 路徑。
+`run_report.bat` 先執行 `uv run main.py`，成功後才執行寄信程式，將 `analysis.html` 與 `analysis_param.html` 一起附在同一封信寄給 `bruce.sy.chen@gmail.com`。任一報告缺少時不寄出。參數版附件請下載後以瀏覽器開啟。`mail_report.py --report` 若指定其他主報告路徑，會一併附上同目錄的 `analysis_param.html`。執行紀錄累加至 `logs\report.log`；成功回傳 0，失敗回傳 1。批次檔會自動切換至專案目錄，並優先使用此電腦已安裝的 uv 路徑。
 
 首次使用或 Gmail 授權失效時，在 PowerShell 執行下列指令完成授權（不會寄信）：
 

@@ -15,7 +15,7 @@ from googleapiclient.errors import HttpError
 
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
-DEFAULT_RECIPIENT = "Bruce1_Chen@asus.com"
+DEFAULT_RECIPIENT = "bruce.sy.chen@gmail.com"
 DEFAULT_REPORT = "analysis.html"
 PARAM_REPORT = "analysis_param.html"
 TOKEN_FILE = "gmail_token.json"
