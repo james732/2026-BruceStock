@@ -51,9 +51,11 @@ class ScoreParameterTests(unittest.TestCase):
             args = argparse.Namespace(output=output, target=Path("unused"), end_date=date(2026, 10, 2))
             with patch.object(main, "parse_arguments", return_value=args), \
                  patch.object(main, "load_stock_ids", return_value=["2330"]), \
+                 patch.object(main, "CachedFinMindClient") as cached, \
                  patch.object(main, "run_analysis", return_value=(
-                     [self.price], self.days, [], [], {"2330": "台積電"}
+                     [self.price], self.days, [], [], {"2330": "台積電"}, {}
                  )) as fetch:
+                cached.return_value.warnings = []
                 self.assertEqual(main.main(), 0)
             fetch.assert_called_once()
             self.assertNotIn('id="score-form"', output.read_text(encoding="utf-8"))

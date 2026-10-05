@@ -19,6 +19,9 @@ from urllib.parse import urlparse
 
 import requests
 
+from finmind_cache import CachedFinMindClient
+from score_history import HISTORY_CSS, HISTORY_SCRIPT, ScoreDay, render_history
+
 
 API_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjoiamFtZXM3MzJAZ21haWwuY29tIiwiZW1haWwiOiJqYW1lczczMkBnbWFpbC5jb20iLCJ0b2tlbl92ZXJzaW9uIjowfQ.cQ1k-Dfqs4Ggb8CdEwHErdmSLJdRFbo8WxtScv_MjWc"
 API_URL = "https://api.finmindtrade.com/api/v4/data"
@@ -114,8 +117,11 @@ class FinMindClient:
         )
 
     def fetch_stock_names(self, stock_ids: Iterable[str]) -> dict[str, str]:
-        rows = self._fetch_rows({"dataset": "TaiwanStockInfo"})
+        rows = self.fetch_stock_info()
         return extract_stock_names(rows, stock_ids)
+
+    def fetch_stock_info(self) -> list[dict[str, Any]]:
+        return self._fetch_rows({"dataset": "TaiwanStockInfo"})
 
     def fetch_stock_news(
         self, stock_id: str, end_date: date, days: int = 7
@@ -591,7 +597,7 @@ def score_conditions(
         (
             day
             for day in institutional_days
-            if day.stock_id == analysis.stock_id
+            if day.stock_id == analysis.stock_id and day.trading_date <= analysis.trading_date
         ),
         key=lambda day: day.trading_date,
     )[-3:]
@@ -614,6 +620,24 @@ def calculate_score(
     return min(100, 100 + sum(value for key, _, value in SCORE_RULES if conditions[key]))
 
 
+def analyze_score_history(
+    stock_id: str, price_rows: list[dict[str, Any]], institution_rows: list[dict[str, Any]],
+) -> list[ScoreDay]:
+    ordered = sorted(price_rows, key=lambda row: str(row["date"]))
+    institution_count = len({str(row["date"]) for row in institution_rows})
+    institutions = analyze_institutional_rows(stock_id, institution_rows, institution_count) if institution_count else []
+    result = []
+    for index in range(max(0, len(ordered) - 10), len(ordered)):
+        trading_date = str(ordered[index]["date"])
+        if index + 1 < max(MA_WINDOWS):
+            result.append(ScoreDay(stock_id, trading_date, None, None))
+            continue
+        analysis = analyze_price_rows(stock_id, ordered[:index + 1])
+        conditions = score_conditions(analysis, institutions)
+        result.append(ScoreDay(stock_id, trading_date, conditions, calculate_score(analysis, institutions)))
+    return result
+
+
 def render_report(
     analyses: list[PriceAnalysis],
     institutional_days: list[InstitutionalDay],
@@ -623,7 +647,13 @@ def render_report(
     requested_end_date: str,
     *,
     adjustable_scores: bool = False,
+    score_histories: dict[str, list[ScoreDay]] | None = None,
+    data_warnings: list[str] | None = None,
 ) -> str:
+    score_histories = score_histories or {}
+    warning_content = ('<section class="note" role="status"><h2>資料更新提醒</h2><ul>'
+                       + ''.join(f'<li>{html.escape(message)}</li>' for message in data_warnings)
+                       + '</ul></section>') if data_warnings else ''
     relation_symbols = {"above": ">", "below": "<", "equal": "="}
     generated_at = datetime.now(TAIPEI_TIMEZONE).strftime("%Y-%m-%d %H:%M:%S %Z")
     institutions_by_stock: dict[str, list[InstitutionalDay]] = defaultdict(list)
@@ -639,9 +669,10 @@ def render_report(
     news_start_date = news_end_date - timedelta(days=6)
 
     scores = {
-        analysis.stock_id: calculate_score(
+        analysis.stock_id: (score_histories[analysis.stock_id][-1].score
+        if score_histories.get(analysis.stock_id) else calculate_score(
             analysis, institutions_by_stock.get(analysis.stock_id, [])
-        )
+        ))
         for analysis in analyses
     }
     sorted_analyses = sorted(
@@ -702,7 +733,9 @@ def render_report(
         conditions_attribute = ""
         if adjustable_scores:
             conditions_attribute = 'data-score-conditions="' + html.escape(
-                json.dumps(score_conditions(analysis, institutions_by_stock[analysis.stock_id])),
+                json.dumps(score_histories[analysis.stock_id][-1].conditions
+                           if score_histories.get(analysis.stock_id)
+                           else score_conditions(analysis, institutions_by_stock[analysis.stock_id])),
                 quote=True,
             ) + '" '
         summary_row = (
@@ -814,6 +847,7 @@ def render_report(
         detail_row = f"""<tr class="institution-details" id="{details_id}" hidden>
   <td colspan="11">
     <section class="institution-panel" aria-label="{html.escape(stock_label, quote=True)} 最近三個交易日法人買賣">
+      {render_history(score_histories.get(analysis.stock_id, []), stock_label)}
       <h3>{html.escape(stock_label)}：最近三個交易日法人買賣</h3>
       <div class="nested-table-wrap">
         <table class="institution-table">
@@ -876,10 +910,11 @@ def render_report(
       cell.dataset.sortValue = String(score);
       cell.classList.remove("score-high", "score-mid", "score-low");
       cell.classList.add(score >= 80 ? "score-high" : score < 70 ? "score-low" : "score-mid");
+      updateHistory(document.getElementById(row.dataset.detailsId), values);
     });
     const activeHeader = Array.from(sortableHeaders).find(header => header.hasAttribute("aria-sort"));
     sortRows(activeHeader, activeHeader.getAttribute("aria-sort"));
-    scoreStatus.textContent = "已依目前參數更新分數與排序。";
+    scoreStatus.textContent = "已依目前參數更新分數、10 日折線圖與排序。";
   }
   scoreForm.addEventListener("submit", event => event.preventDefault());
   scoreForm.addEventListener("input", updateScores);
@@ -959,6 +994,7 @@ def render_report(
     .neutral, .relation-equal {{ color: #475467; font-weight: 700; }}
     code {{ background: #edf1f5; padding: 2px 5px; border-radius: 4px; }}
     @media (max-width: 720px) {{ main {{ padding: 14px; }} h1 {{ font-size: 1.55rem; }} }}
+    {HISTORY_CSS}
   </style>
 </head>
 <body>
@@ -976,6 +1012,7 @@ def render_report(
     <li>展開區同時列出查詢截止日往前 7 個日曆日的相關新聞；新聞標題會開啟原始來源。</li>
   </ul>
 
+  {warning_content}
   {score_controls}
   <h2>均線與成交量總覽</h2>
   <div class="table-wrap">
@@ -1057,6 +1094,7 @@ def render_report(
       sortRows(header, direction);
     }});
   }});
+  {HISTORY_SCRIPT if adjustable_scores else ''}
   {score_script}
 </script>
 </body>
@@ -1075,6 +1113,7 @@ def run_analysis(
     list[WeeklyHolding],
     list[StockNews],
     dict[str, str],
+    dict[str, list[ScoreDay]],
 ]:
     start_date = end_date - timedelta(days=LOOKBACK_CALENDAR_DAYS)
     start_date_text = start_date.isoformat()
@@ -1083,6 +1122,7 @@ def run_analysis(
     institutional_days: list[InstitutionalDay] = []
     stock_news: list[StockNews] = []
     price_rows_by_stock: dict[str, list[dict[str, Any]]] = {}
+    score_histories: dict[str, list[ScoreDay]] = {}
     print("Fetching stock names...", file=sys.stderr)
     stock_names = client.fetch_stock_names(stock_ids)
 
@@ -1098,10 +1138,15 @@ def run_analysis(
             end_date_text,
         )
         news_rows = client.fetch_stock_news(stock_id, end_date, days=7)
+        price_rows = [row for row in price_rows if str(row["date"]) <= end_date_text]
+        institution_rows = [row for row in institution_rows if str(row["date"]) <= end_date_text]
         price_rows_by_stock[stock_id] = price_rows
         price_analyses.append(analyze_price_rows(stock_id, price_rows))
+        score_histories[stock_id] = analyze_score_history(stock_id, price_rows, institution_rows)
         institutional_days.extend(
-            analyze_institutional_rows(stock_id, institution_rows)
+            analyze_institutional_rows(stock_id, institution_rows,
+                                       min(3, len({str(row["date"]) for row in institution_rows})))
+            if institution_rows else []
         )
         stock_news.extend(analyze_news_rows(stock_id, news_rows))
 
@@ -1111,13 +1156,14 @@ def run_analysis(
         stock_ids, snapshots, price_rows_by_stock, display_weeks=4
     )
 
-    return price_analyses, institutional_days, weekly_holdings, stock_news, stock_names
+    return price_analyses, institutional_days, weekly_holdings, stock_news, stock_names, score_histories
 
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Analyze target Taiwan stocks with FinMind data."
     )
+    parser.add_argument("--refresh-cache", action="store_true", help="Refresh all FinMind data required by this report.")
     parser.add_argument(
         "--target",
         type=Path,
@@ -1141,15 +1187,18 @@ def parse_arguments() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_arguments()
+    client = None
     try:
         param_output = args.output.with_name("analysis_param.html")
         if args.output.resolve() == param_output.resolve():
             raise ValueError("--output must differ from analysis_param.html")
         stock_ids = load_stock_ids(args.target)
-        analyses, institutional_days, weekly_holdings, stock_news, stock_names = run_analysis(
+        client = CachedFinMindClient(FinMindClient(API_TOKEN), Path(__file__).resolve().parent / "data" / "finmind.sqlite3",
+                                     refresh=getattr(args, "refresh_cache", False))
+        analyses, institutional_days, weekly_holdings, stock_news, stock_names, score_histories = run_analysis(
             stock_ids,
             args.end_date,
-            FinMindClient(API_TOKEN),
+            client,
             TdccClient(Path("tdcc_cache")),
         )
         report = render_report(
@@ -1159,6 +1208,8 @@ def main() -> int:
             stock_news,
             stock_names,
             args.end_date.isoformat(),
+            score_histories=score_histories,
+            data_warnings=client.warnings,
         )
         args.output.write_text(report, encoding="utf-8")
         param_report = render_report(
@@ -1169,11 +1220,16 @@ def main() -> int:
             stock_names,
             args.end_date.isoformat(),
             adjustable_scores=True,
+            score_histories=score_histories,
+            data_warnings=client.warnings,
         )
         param_output.write_text(param_report, encoding="utf-8")
     except (OSError, ValueError, RuntimeError, requests.RequestException) as error:
         print(f"Analysis failed: {error}", file=sys.stderr)
         return 1
+    finally:
+        if client is not None:
+            client.close()
 
     print(f"Report written to {args.output}")
     print(f"Adjustable report written to {param_output}")

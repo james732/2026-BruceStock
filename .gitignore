@@ -28,6 +28,7 @@ analysis_param.html
 score_*.txt
 logs/
 tdcc_cache/
+data/*.sqlite3*
 
 # IDE and operating-system files
 .idea/
