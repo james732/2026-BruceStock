@@ -52,6 +52,7 @@ class PriceAnalysis:
     recent_average_volume: float
     previous_average_volume: float
     volume_increased: bool
+    previous_close: float | None = None
 
 
 @dataclass(frozen=True)
@@ -471,6 +472,7 @@ def analyze_price_rows(stock_id: str, rows: Iterable[dict[str, Any]]) -> PriceAn
         recent_average_volume=recent_average_volume,
         previous_average_volume=previous_average_volume,
         volume_increased=recent_average_volume > previous_average_volume,
+        previous_close=closes[-2],
     )
 
 
@@ -684,12 +686,31 @@ def render_report(
         key=lambda analysis: (-scores[analysis.stock_id], analysis.stock_id),
     )
 
+    conditions_by_stock = {
+        analysis.stock_id: (
+            score_histories[analysis.stock_id][-1].conditions
+            if score_histories.get(analysis.stock_id)
+            else score_conditions(analysis, institutions_by_stock[analysis.stock_id])
+        )
+        for analysis in analyses
+    }
+    qualifying_stocks = [
+        html.escape(f'{analysis.stock_id} {stock_names.get(analysis.stock_id, "名稱未提供")}')
+        for analysis in sorted_analyses
+        if (conditions_by_stock[analysis.stock_id] or {}).get("institution", False)
+    ]
+    institution_summary = "、".join(qualifying_stocks) or "無符合個股"
+
     price_rows: list[str] = []
     for analysis in sorted_analyses:
         stock_name = stock_names.get(analysis.stock_id, "名稱未提供")
         stock_label = f"{analysis.stock_id} {stock_name}"
         details_id = f"institution-{analysis.stock_id}"
         score = scores[analysis.stock_id]
+        close_class = (
+            "positive" if analysis.close > analysis.previous_close else
+            "negative" if analysis.close < analysis.previous_close else "neutral"
+        ) if analysis.previous_close is not None else "neutral"
         score_class = (
             "score-high" if score >= 80 else "score-low" if score < 70 else "score-mid"
         )
@@ -706,7 +727,7 @@ def render_report(
                 f'<td data-sort-value="{html.escape(analysis.trading_date, quote=True)}">'
                 f"{html.escape(analysis.trading_date)}</td>"
             ),
-            f'<td data-sort-value="{analysis.close}">{format_price(analysis.close)}</td>',
+            f'<td class="{close_class}" data-sort-value="{analysis.close}">{format_price(analysis.close)}</td>',
         ]
         for window in MA_WINDOWS:
             relation = analysis.relations[window]
@@ -737,9 +758,7 @@ def render_report(
         conditions_attribute = ""
         if adjustable_scores:
             conditions_attribute = 'data-score-conditions="' + html.escape(
-                json.dumps(score_histories[analysis.stock_id][-1].conditions
-                           if score_histories.get(analysis.stock_id)
-                           else score_conditions(analysis, institutions_by_stock[analysis.stock_id])),
+                json.dumps(conditions_by_stock[analysis.stock_id]),
                 quote=True,
             ) + '" '
         summary_row = (
@@ -1024,6 +1043,8 @@ def render_report(
   {warning_content}
   {score_controls}
   <h2>均線與成交量總覽</h2>
+  <p class="note" id="institution-qualified"><strong>符合法人加分條件個股：</strong>{institution_summary}<br>條件：法人連續十個交易日皆為淨買超，且每日淨買超大於近十日平均成交量的 5%（預設加 10 分）。</p>
+  <p>收盤價相較前一個交易日：上漲為紅色，下跌為綠色，平盤為灰色。</p>
   <div class="table-wrap">
     <table class="overview-table" id="overview-table">
       <thead><tr>
