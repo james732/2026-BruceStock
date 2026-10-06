@@ -38,7 +38,7 @@ SCORE_RULES = (
     ("ma20", "收盤低於月線", -20),
     ("ma60", "收盤低於季線", -30),
     ("volume", "最近均量未增加", -10),
-    ("institution", "法人連續三個交易日皆為淨買超", 10),
+    ("institution", "法人連續十個交易日皆為淨買超，且每日淨買超大於近十日平均成交量的 5%", 10),
 )
 
 
@@ -488,7 +488,7 @@ def institutional_bucket(name: str) -> str:
 def analyze_institutional_rows(
     stock_id: str,
     rows: Iterable[dict[str, Any]],
-    trading_days: int = 3,
+    trading_days: int = 10,
 ) -> list[InstitutionalDay]:
     rows_by_date: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -600,14 +600,18 @@ def score_conditions(
             if day.stock_id == analysis.stock_id and day.trading_date <= analysis.trading_date
         ),
         key=lambda day: day.trading_date,
-    )[-3:]
+    )[-10:]
     return {
         "ma5": analysis.relations[5] != "above",
         "ma10": analysis.relations[10] != "above",
         "ma20": analysis.relations[20] == "below",
         "ma60": analysis.relations[60] == "below",
         "volume": not analysis.volume_increased,
-        "institution": len(recent_days) == 3 and all(day.total_net > 0 for day in recent_days),
+        "institution": len(recent_days) == 10 and all(
+            day.total_net > 0
+            and day.total_net > analysis.recent_average_volume * 0.05
+            for day in recent_days
+        ),
     }
 
 
@@ -615,7 +619,7 @@ def calculate_score(
     analysis: PriceAnalysis,
     institutional_days: Iterable[InstitutionalDay],
 ) -> int:
-    """Calculate the overview score described in score_1005.txt."""
+    """Calculate the overview score using SCORE_RULES and current conditions."""
     conditions = score_conditions(analysis, institutional_days)
     return min(100, 100 + sum(value for key, _, value in SCORE_RULES if conditions[key]))
 
@@ -717,11 +721,11 @@ def render_report(
             [
                 (
                     f'<td data-sort-value="{analysis.recent_average_volume}">'
-                    f"{format_volume(analysis.recent_average_volume)}</td>"
+                    f"{format_lots(analysis.recent_average_volume)}</td>"
                 ),
                 (
                     f'<td data-sort-value="{analysis.previous_average_volume}">'
-                    f"{format_volume(analysis.previous_average_volume)}</td>"
+                    f"{format_lots(analysis.previous_average_volume)}</td>"
                 ),
                 (
                     '<td class="volume-up" data-sort-value="1">是</td>'
@@ -748,7 +752,12 @@ def render_report(
         )
 
         detail_rows: list[str] = []
-        for day in institutions_by_stock.get(analysis.stock_id, []):
+        displayed_days = sorted(
+            (day for day in institutions_by_stock.get(analysis.stock_id, [])
+             if day.trading_date <= analysis.trading_date),
+            key=lambda day: day.trading_date,
+        )[-5:]
+        for day in displayed_days:
             net_values = [
                 day.foreign_net,
                 day.investment_trust_net,
@@ -846,9 +855,9 @@ def render_report(
 
         detail_row = f"""<tr class="institution-details" id="{details_id}" hidden>
   <td colspan="11">
-    <section class="institution-panel" aria-label="{html.escape(stock_label, quote=True)} 最近三個交易日法人買賣">
+    <section class="institution-panel" aria-label="{html.escape(stock_label, quote=True)} 最近五個交易日法人買賣">
       {render_history(score_histories.get(analysis.stock_id, []), stock_label)}
-      <h3>{html.escape(stock_label)}：最近三個交易日法人買賣</h3>
+      <h3>{html.escape(stock_label)}：最近五個交易日法人買賣</h3>
       <div class="nested-table-wrap">
         <table class="institution-table">
           <thead><tr><th>日期</th><th>外資淨額（張）</th><th>投信淨額（張）</th><th>自營商淨額（張）</th><th>外資自營商淨額（張）</th><th>其他淨額（張）</th><th>法人買進（張）</th><th>法人賣出（張）</th><th>法人合計淨額（張）</th></tr></thead>
@@ -867,7 +876,7 @@ def render_report(
     score_description = (
         "總分以 100 分為上限：收盤未高於 5 日、10 日均線分別扣 5、10 分；"
         "低於月線、季線分別扣 20、30 分；最近均量未增加扣 10 分；"
-        "法人連續三個交易日皆為淨買超加 10 分。"
+        "法人連續十個交易日皆為淨買超，且每日淨買超大於近十日平均成交量的 5% 才加 10 分。"
     )
     score_controls = ""
     score_script = ""
@@ -1026,8 +1035,8 @@ def render_report(
         <th class="sortable"><button type="button" class="sort-button" data-column="5" data-type="number">10 日均線<span class="sort-indicator" aria-hidden="true"></span></button></th>
         <th class="sortable"><button type="button" class="sort-button" data-column="6" data-type="number">月線<span class="sort-indicator" aria-hidden="true"></span></button></th>
         <th class="sortable"><button type="button" class="sort-button" data-column="7" data-type="number">季線<span class="sort-indicator" aria-hidden="true"></span></button></th>
-        <th class="sortable"><button type="button" class="sort-button" data-column="8" data-type="number">最近 10 日均量（股）<span class="sort-indicator" aria-hidden="true"></span></button></th>
-        <th class="sortable"><button type="button" class="sort-button" data-column="9" data-type="number">前 10 日均量（股）<span class="sort-indicator" aria-hidden="true"></span></button></th>
+        <th class="sortable"><button type="button" class="sort-button" data-column="8" data-type="number">最近 10 日均量（張）<span class="sort-indicator" aria-hidden="true"></span></button></th>
+        <th class="sortable"><button type="button" class="sort-button" data-column="9" data-type="number">前 10 日均量（張）<span class="sort-indicator" aria-hidden="true"></span></button></th>
         <th class="sortable"><button type="button" class="sort-button" data-column="10" data-type="number">最近均量較大<span class="sort-indicator" aria-hidden="true"></span></button></th>
       </tr></thead>
       <tbody id="overview-body">{''.join(price_rows)}</tbody>
@@ -1145,7 +1154,7 @@ def run_analysis(
         score_histories[stock_id] = analyze_score_history(stock_id, price_rows, institution_rows)
         institutional_days.extend(
             analyze_institutional_rows(stock_id, institution_rows,
-                                       min(3, len({str(row["date"]) for row in institution_rows})))
+                                       min(10, len({str(row["date"]) for row in institution_rows})))
             if institution_rows else []
         )
         stock_news.extend(analyze_news_rows(stock_id, news_rows))

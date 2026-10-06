@@ -173,10 +173,10 @@ class AnalysisTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "at least 60"):
             analyze_price_rows("2330", rows)
 
-    def test_institutional_analysis_aggregates_last_three_dates(self) -> None:
+    def test_institutional_analysis_aggregates_last_ten_dates(self) -> None:
         rows = []
-        for day in range(1, 5):
-            trading_date = f"2026-10-0{day}"
+        for day in range(1, 12):
+            trading_date = f"2026-10-{day:02d}"
             rows.extend(
                 [
                     {
@@ -214,12 +214,12 @@ class AnalysisTests(unittest.TestCase):
 
         result = analyze_institutional_rows("2330", rows)
 
-        self.assertEqual([day.trading_date for day in result], ["2026-10-02", "2026-10-03", "2026-10-04"])
-        self.assertEqual(result[-1].foreign_net, 4_000)
+        self.assertEqual([day.trading_date for day in result], [f"2026-10-{day:02d}" for day in range(2, 12)])
+        self.assertEqual(result[-1].foreign_net, 11_000)
         self.assertEqual(result[-1].investment_trust_net, -1_000)
         self.assertEqual(result[-1].dealer_net, 900)
         self.assertEqual(result[-1].foreign_dealer_net, 200)
-        self.assertEqual(result[-1].total_net, 4_100)
+        self.assertEqual(result[-1].total_net, 11_100)
 
     def test_report_is_traditional_chinese_html(self) -> None:
         price_rows = [
@@ -232,12 +232,12 @@ class AnalysisTests(unittest.TestCase):
         ]
         institution_rows = [
             {
-                "date": f"2026-10-0{day}",
+                "date": f"2026-01-{day:02d}",
                 "name": "Foreign_Investor",
                 "buy": 2_000,
                 "sell": 1_000,
             }
-            for day in range(1, 4)
+            for day in range(41, 61)
         ]
         report = render_report(
             [analyze_price_rows("2330", price_rows)],
@@ -276,7 +276,16 @@ class AnalysisTests(unittest.TestCase):
         self.assertIn('<span class="stock-name">台積電</span>', report)
         self.assertIn('<td class="relation-above" data-sort-value="58.0">58(&gt;)</td>', report)
         self.assertNotIn("<th>關係</th>", report)
-        self.assertIn("最近三個交易日法人買賣", report)
+        self.assertIn("最近五個交易日法人買賣", report)
+        institution_table = report.split('<table class="institution-table">')[1].split('</table>')[0]
+        self.assertEqual(institution_table.count('<tr>'), 6)  # Header and five trading days.
+        self.assertIn("2026-01-56", institution_table)
+        self.assertIn("2026-01-60", institution_table)
+        self.assertNotIn("2026-01-55", institution_table)
+        self.assertIn("最近 10 日均量（張）", report)
+        self.assertIn("前 10 日均量（張）", report)
+        self.assertIn('data-sort-value="5550.0">6</td>', report)
+        self.assertIn('data-sort-value="4550.0">5</td>', report)
         self.assertIn('aria-controls="institution-2330"', report)
         self.assertIn('<tr class="institution-details" id="institution-2330" hidden>', report)
         self.assertIn("最近四週股價與持股分級", report)
@@ -285,7 +294,7 @@ class AnalysisTests(unittest.TestCase):
         self.assertIn("近七日個股新聞（2026-09-26 至 2026-10-02）", report)
         self.assertIn('href="https://example.com/news"', report)
         self.assertLess(report.index("最近四週股價與持股分級"), report.index("近七日個股新聞"))
-        self.assertNotIn("<h2>最近三個交易日法人買賣</h2>", report)
+        self.assertNotIn("<h2>最近五個交易日法人買賣</h2>", report)
         self.assertEqual(report.count("<table"), 4)
         self.assertEqual(report.count("<tbody"), 4)
 

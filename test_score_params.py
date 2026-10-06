@@ -2,6 +2,7 @@ import argparse
 import json
 import tempfile
 import unittest
+from dataclasses import replace
 from datetime import date
 from html import unescape
 from pathlib import Path
@@ -20,9 +21,25 @@ class ScoreParameterTests(unittest.TestCase):
             100, 100, False,
         )
         self.days = [
-            main.InstitutionalDay("2330", f"2026-09-{day}", 1, 0, 0, 0, 0, 1, 0)
-            for day in (28, 29, 30)
+            main.InstitutionalDay("2330", f"2026-09-{day}", 6, 0, 0, 0, 0, 6, 0)
+            for day in (17, 18, 21, 22, 23, 24, 25, 28, 29, 30)
         ]
+
+    def test_institution_bonus_requires_ten_days_strictly_above_five_percent(self):
+        self.assertFalse(main.score_conditions(self.price, self.days[1:])["institution"])
+        for net in (-1, 0, 4.99, 5):
+            with self.subTest(net=net):
+                days = [replace(self.days[0], total_buy=net), *self.days[1:]]
+                self.assertFalse(main.score_conditions(self.price, days)["institution"])
+        days = [replace(self.days[0], total_buy=5.01), *self.days[1:]]
+        self.assertTrue(main.score_conditions(self.price, days)["institution"])
+        self.assertFalse(main.score_conditions(replace(self.price, recent_average_volume=200), days)["institution"])
+
+    def test_institution_window_ignores_old_future_and_other_stock_days(self):
+        extra = [replace(self.days[0], trading_date="2026-09-16", total_buy=0),
+                 replace(self.days[-1], trading_date="2026-10-05", total_buy=0),
+                 replace(self.days[-1], stock_id="2454", total_buy=0)]
+        self.assertTrue(main.score_conditions(self.price, list(reversed(self.days + extra)))["institution"])
 
     def test_equal_ma_only_penalizes_short_windows_and_volume(self):
         self.assertEqual(main.calculate_score(self.price, []), 75)
