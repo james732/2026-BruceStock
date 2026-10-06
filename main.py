@@ -38,7 +38,7 @@ SCORE_RULES = (
     ("ma20", "收盤低於月線", -20),
     ("ma60", "收盤低於季線", -30),
     ("volume", "最近均量未增加", -10),
-    ("institution", "法人連續十個交易日皆為淨買超，且每日淨買超大於近十日平均成交量的 5%", 10),
+    ("institution", "法人近十個交易日平均淨買超為正值，且大於近十日平均成交量的 3%", 10),
 )
 
 
@@ -603,16 +603,17 @@ def score_conditions(
         ),
         key=lambda day: day.trading_date,
     )[-10:]
+    average_institution_net = sum(day.total_net for day in recent_days) / 10
     return {
         "ma5": analysis.relations[5] != "above",
         "ma10": analysis.relations[10] != "above",
         "ma20": analysis.relations[20] == "below",
         "ma60": analysis.relations[60] == "below",
         "volume": not analysis.volume_increased,
-        "institution": len(recent_days) == 10 and all(
-            day.total_net > 0
-            and day.total_net > analysis.recent_average_volume * 0.05
-            for day in recent_days
+        "institution": (
+            len(recent_days) == 10
+            and average_institution_net > 0
+            and average_institution_net > analysis.recent_average_volume * 0.03
         ),
     }
 
@@ -895,7 +896,7 @@ def render_report(
     score_description = (
         "總分以 100 分為上限：收盤未高於 5 日、10 日均線分別扣 5、10 分；"
         "低於月線、季線分別扣 20、30 分；最近均量未增加扣 10 分；"
-        "法人連續十個交易日皆為淨買超，且每日淨買超大於近十日平均成交量的 5% 才加 10 分。"
+        "法人近十個交易日平均淨買超為正值，且大於近十日平均成交量的 3% 才加 10 分。"
     )
     score_controls = ""
     score_script = ""
@@ -1043,7 +1044,7 @@ def render_report(
   {warning_content}
   {score_controls}
   <h2>均線與成交量總覽</h2>
-  <p class="note" id="institution-qualified"><strong>符合法人加分條件個股：</strong>{institution_summary}<br>條件：法人連續十個交易日皆為淨買超，且每日淨買超大於近十日平均成交量的 5%（預設加 10 分）。</p>
+  <p class="note" id="institution-qualified"><strong>符合法人加分條件個股：</strong>{institution_summary}<br>條件：法人近十個交易日平均淨買超為正值，且大於近十日平均成交量的 3%（預設加 10 分）。</p>
   <p>收盤價相較前一個交易日：上漲為紅色，下跌為綠色，平盤為灰色。</p>
   <div class="table-wrap">
     <table class="overview-table" id="overview-table">

@@ -25,15 +25,24 @@ class ScoreParameterTests(unittest.TestCase):
             for day in (17, 18, 21, 22, 23, 24, 25, 28, 29, 30)
         ]
 
-    def test_institution_bonus_requires_ten_days_strictly_above_five_percent(self):
+    def test_institution_bonus_requires_ten_day_average_above_three_percent(self):
         self.assertFalse(main.score_conditions(self.price, self.days[1:])["institution"])
-        for net in (-1, 0, 4.99, 5):
+        for net in (-1, 0, 2.99, 3):
             with self.subTest(net=net):
-                days = [replace(self.days[0], total_buy=net), *self.days[1:]]
+                days = [replace(day, total_buy=net) for day in self.days]
                 self.assertFalse(main.score_conditions(self.price, days)["institution"])
-        days = [replace(self.days[0], total_buy=5.01), *self.days[1:]]
+        days = [replace(day, total_buy=3.01) for day in self.days]
         self.assertTrue(main.score_conditions(self.price, days)["institution"])
         self.assertFalse(main.score_conditions(replace(self.price, recent_average_volume=200), days)["institution"])
+
+    def test_institution_bonus_allows_net_selling_days(self):
+        days = [replace(self.days[0], total_buy=0, total_sell=20), *self.days[1:]]
+        self.assertTrue(main.score_conditions(self.price, days)["institution"])
+        self.assertEqual(main.calculate_score(self.price, days), 85)
+        days[0] = replace(days[0], total_sell=24)  # Average is exactly 3%.
+        self.assertFalse(main.score_conditions(self.price, days)["institution"])
+        days[0] = replace(days[0], total_sell=54)  # Average is zero.
+        self.assertFalse(main.score_conditions(self.price, days)["institution"])
 
     def test_institution_window_ignores_old_future_and_other_stock_days(self):
         extra = [replace(self.days[0], trading_date="2026-09-16", total_buy=0),
