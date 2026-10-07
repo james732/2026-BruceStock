@@ -71,11 +71,19 @@ class ScoreParameterTests(unittest.TestCase):
         self.assertIn('data-sort-value="85">85</td>', report)
         self.assertNotIn('id="score-form"', main.render_report(*args))
 
+    def test_main_requires_token_before_fetching(self):
+        with patch.object(main, "API_TOKEN", ""), \
+             patch.object(main, "parse_arguments"), \
+             patch.object(main, "CachedFinMindClient") as client:
+            self.assertEqual(main.main(), 1)
+            client.assert_not_called()
+
     def test_main_writes_both_reports_from_one_fetch(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "custom.html"
             args = argparse.Namespace(output=output, target=Path("unused"), end_date=date(2026, 10, 2))
-            with patch.object(main, "parse_arguments", return_value=args), \
+            with patch.object(main, "API_TOKEN", "offline-test-token"), \
+                 patch.object(main, "parse_arguments", return_value=args), \
                  patch.object(main, "load_stock_ids", return_value=["2330"]), \
                  patch.object(main, "CachedFinMindClient") as cached, \
                  patch.object(main, "run_analysis", return_value=(

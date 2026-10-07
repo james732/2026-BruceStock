@@ -1,0 +1,98 @@
+name: Generate stock report
+on:
+  workflow_dispatch:
+    inputs:
+      end_date:
+        description: "Query cutoff (YYYY-MM-DD); blank uses today's Taipei date"
+        required: false
+        type: string
+  schedule:
+    - cron: "0 12 * * 1-5" # Monday-Friday 20:00 Asia/Taipei
+permissions:
+  contents: read
+concurrency:
+  group: stock-report
+  cancel-in-progress: false
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: uv sync --frozen
+      - name: Run offline tests
+        run: uv run --frozen python -m unittest -v
+      - name: Restore market data cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/finmind.sqlite3
+            tdcc_cache
+          key: market-data-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            market-data-${{ runner.os }}-
+      - name: Generate reports (no email)
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+          END_DATE: ${{ inputs.end_date }}
+        shell: bash
+        run: |
+          mkdir -p public
+          args=()
+          if [[ -n "$END_DATE" ]]; then
+            args+=(--end-date "$END_DATE")
+          fi
+          uv run --frozen main.py --output public/analysis.html "${args[@]}"
+          cp public/analysis.html public/index.html
+          test -s public/index.html
+          test -s public/analysis_param.html
+      - name: Save updated market data cache
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            data/finmind.sqlite3
+            tdcc_cache
+          key: market-data-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Save downloadable reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: stock-report-${{ github.run_id }}
+          path: public/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Package website
+        if: vars.PAGES_ENABLED == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public/
+      - name: Report next steps
+        env:
+          PAGES_ENABLED: ${{ vars.PAGES_ENABLED }}
+        run: |
+          echo "### Stock report generated" >> "$GITHUB_STEP_SUMMARY"
+          echo "Download both HTML reports from this run's artifact. No email was sent." >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$PAGES_ENABLED" != "true" ]]; then
+            echo "To publish: enable Settings > Pages > GitHub Actions, then set repository variable PAGES_ENABLED=true." >> "$GITHUB_STEP_SUMMARY"
+          fi
+  deploy:
+    if: vars.PAGES_ENABLED == 'true'
+    needs: generate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy generated HTML
+        id: deployment
+        uses: actions/deploy-pages@v4

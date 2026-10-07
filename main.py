@@ -6,6 +6,7 @@ import html
 import io
 import json
 import math
+import os
 import re
 import sys
 from collections import defaultdict
@@ -23,7 +24,7 @@ from finmind_cache import CachedFinMindClient
 from score_history import HISTORY_CSS, HISTORY_SCRIPT, ScoreDay, render_history
 
 
-API_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjoiamFtZXM3MzJAZ21haWwuY29tIiwiZW1haWwiOiJqYW1lczczMkBnbWFpbC5jb20iLCJ0b2tlbl92ZXJzaW9uIjowfQ.cQ1k-Dfqs4Ggb8CdEwHErdmSLJdRFbo8WxtScv_MjWc"
+API_TOKEN = os.environ.get("FINMIND_TOKEN", "").strip()
 API_URL = "https://api.finmindtrade.com/api/v4/data"
 TDCC_OFFICIAL_URL = "https://openapi.tdcc.com.tw/v1/opendata/1-5"
 TDCC_ARCHIVE_CONTENTS_URL = (
@@ -1220,6 +1221,8 @@ def main() -> int:
     args = parse_arguments()
     client = None
     try:
+        if not API_TOKEN:
+            raise ValueError("FINMIND_TOKEN is required. Set it in your environment or GitHub Actions secrets.")
         param_output = args.output.with_name("analysis_param.html")
         if args.output.resolve() == param_output.resolve():
             raise ValueError("--output must differ from analysis_param.html")

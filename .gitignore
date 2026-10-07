@@ -36,3 +36,6 @@ data/*.sqlite3*
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Generated cloud reports
+/public/

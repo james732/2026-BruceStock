@@ -69,7 +69,7 @@ API 失敗不會覆蓋成功快取；若快取完整，報表會使用快取並�
 - 顯示四週漲跌需要五個週次的收盤價；若集保資料日休市，採該日以前最近一個交易日的收盤價。
 - `＞400張～≤800張` 合併 TDCC 分級 12、13；`＞800張～≤1千張` 使用分級 14；`＞1千張` 使用分級 15，並以分級 17 的集保庫存總股數重新計算比例。
 
-API token 依目前專案需求直接寫在 `main.py`。請勿公開分享此檔案或將其提交到公開儲存庫。
+API token 由環境變數 `FINMIND_TOKEN` 提供；未設定時會停止產生報告。雲端執行使用同名 Actions Secret。
 
 ## 平日 20:00 自動寄送
 
@@ -92,3 +92,44 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install_schedule.ps1
 若手動建立排程，程式填 `C:\Windows\System32\cmd.exe`，引數填 `/d /c ""C:\Users\3\Desktop\finmindtrade\run_report.bat""`，開始位置填 `C:\Users\3\Desktop\finmindtrade`，觸發條件設每週一至五 20:00。
 
 手動執行 `run_report.bat` 會產生報表並實際寄信。排程採非互動授權模式；需要重新授權時會失敗並記錄錯誤，不會等待瀏覽器登入。
+
+## 雲端產生報告與瀏覽網頁（不寄信）
+
+新增的 `Generate stock report` workflow 只執行分析與網站發布，不執行
+`run_report.bat` 或 `mail_report.py`，也不需要 Gmail 授權。
+平日台北時間 20:00 觸發；GitHub 排程可能延遲，國定假日仍會執行。
+可在 Actions 手動執行，選填 `end_date`（YYYY-MM-DD），留空使用台北當日日期。
+
+### 首次設定
+
+1. Settings → Secrets and variables → Actions → Secrets，新增 `FINMIND_TOKEN`。
+   使用你目前的 FinMind API token；不要將值貼進程式、commit 或執行紀錄。
+2. Settings → Pages → Build and deployment → Source 選 `GitHub Actions`。
+   此專案是私有儲存庫，直接啟用 Pages 需帳號方案支援；一般 Pages 網站公開可瀏覽。
+   若 Pages 不可用，報告仍可從 Actions artifact 下載；保留程式庫私有。
+3. Secrets and variables → Actions → Variables，新增 `PAGES_ENABLED`，值為 `true`。
+   未設定時只產生與保存 HTML，略過網站部署。
+4. Actions → Generate stock report → Run workflow（選 main）。
+   成功後 deploy job 顯示实际網站網址；artifact 保存 30 天。
+
+首頁為生成報告的副本 `index.html`，另保留 `analysis.html` 與
+`analysis_param.html`。可由網站網址後加 `analysis_param.html` 開啟參數版。
+部署目錄僅含本次生成的 HTML，不含原始碼、token、SQLite 或 Gmail 憑證。
+網站目前展示最新一次成功發布的報告，不提供長期歷史頁面。
+產生失敗不部署，線上保持上一份成功報告；請查看報告產生時間。
+調整 `target.txt` 後，新一次執行即使用新的股票名單。
+
+SQLite 與 TDCC 快取透過 Actions cache 還原與保存。
+每次使用新的 cache key 並還原前次版本，避免固定 key 不能更新的問題。
+cache 可能被清除，因此仍需可從來源重建，不能當成長期備份。
+Actions 執行時間、artifact 與 cache 用量受 GitHub 帳號額度限制。
+
+本機執行也改為從環境變數讀取 token，例如 PowerShell：
+
+```powershell
+$env:FINMIND_TOKEN = "<你的 FinMind token>"
+uv run main.py
+```
+
+原有 Windows 自動寄信排程仍是獨立設定；若你不希望本機繼續寄信，
+請停用 `FinMindTrade-WeekdayReport` 工作。雲端 workflow 不會修改本機排程。
