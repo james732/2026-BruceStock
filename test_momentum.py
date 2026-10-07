@@ -275,9 +275,11 @@ class MomentumPageTests(unittest.TestCase):
         self.assertIn('&lt;error&gt;',s)
         self.assertNotIn('stock-<script>',s)
         self.assertIn('stock-&lt;script&gt;',s)
-        self.assertIn('<th>籌碼集中</th>',s)
+        self.assertIn('5 日均線',s)
+        self.assertIn('收盤價',s)
+        self.assertIn('最近 10 日均量（張）',s)
         self.assertIn('aria-expanded="false"',s)
-        self.assertIn('class="stock-detail" hidden',s)
+        self.assertIn('class="institution-details stock-detail" hidden',s)
         self.assertLess(s.index('查看 11 條評分規則與輸入值'), s.index('近三日個股新聞'))
         self.assertIn('analysis_momentum.html',s)
         self.assertIn('Config SHA-256',s)
@@ -293,6 +295,22 @@ class MomentumPageTests(unittest.TestCase):
         self.assertIn('無法計分',s)
         remote._fetch_rows.assert_called_once_with({'dataset':'TaiwanStockTradingDate'})
         cache.fetch_stock_news.assert_called_once_with('2330', now.date(), days=3)
+
+    def test_overview_matches_original_except_score(self):
+        import re
+        from main import analyze_price_rows, render_report
+        prices = [dict(date=(date(2026, 8, 1) + timedelta(days=i-1)).isoformat(), close=i, Trading_Volume=1000*i) for i in range(1, 61)]
+        analysis = analyze_price_rows('2330', prices)
+        result = evaluate(bullish()); result.update(symbol='2330', price_analysis=analysis)
+        old = render_report([analysis], [], [], [], {'2330':'台積電'}, '2026-10-07')
+        new = render([result], {'2330':'台積電'}, '2026-10-07', 'now', Config(), [])
+        old_row = re.search(r'<tr class="stock-row".*?</tr>', old, re.S).group(0)
+        new_row = re.search(r'<tr class="stock-row".*?</tr>', new, re.S).group(0)
+        old_cells = re.findall(r'<td.*?</td>', old_row, re.S)
+        new_cells = re.findall(r'<td.*?</td>', new_row, re.S)
+        self.assertEqual(old_cells[1:], new_cells[1:])
+        self.assertIn('>115</td>', new_cells[0])
+        self.assertEqual(re.search(r'<thead>.*?</thead>', old, re.S).group(0), re.search(r'<thead>.*?</thead>', new, re.S).group(0))
 
     def test_news_window_and_safe_links(self):
         from main import analyze_news_rows
