@@ -273,20 +273,35 @@ class MomentumPageTests(unittest.TestCase):
         self.assertIn('115 分',s)
         self.assertIn('資料不完整（不納入排名）',s)
         self.assertIn('&lt;error&gt;',s)
-        self.assertNotIn('<script>',s)
+        self.assertNotIn('stock-<script>',s)
+        self.assertIn('stock-&lt;script&gt;',s)
+        self.assertIn('<th>籌碼集中</th>',s)
+        self.assertIn('aria-expanded="false"',s)
+        self.assertIn('class="stock-detail" hidden',s)
+        self.assertLess(s.index('查看 11 條評分規則與輸入值'), s.index('近三日個股新聞'))
         self.assertIn('analysis_momentum.html',s)
         self.assertIn('Config SHA-256',s)
 
     def test_generate_with_network_mocks_and_missing_tdcc(self):
         remote=Mock(); remote._fetch_rows.return_value=[{'date':'2026-10-06'}]
         remote.fetch_stock_names.return_value={'2330':'台積電'}
-        cache=Mock(); cache.fetch.return_value=[]; cache.warnings=[]
+        cache=Mock(); cache.fetch.return_value=[]; cache.fetch_stock_news.return_value=[]; cache.warnings=[]
         tdcc=Mock(); tdcc.fetch_recent_snapshots.side_effect=RuntimeError('missing')
         now=datetime(2026,10,7,11,tzinfo=TAIPEI_TIMEZONE)
         s=generate(['2330'],now.date(),remote,cache,tdcc,Config(),now)
         self.assertIn('集保資料取得失敗',s)
         self.assertIn('無法計分',s)
         remote._fetch_rows.assert_called_once_with({'dataset':'TaiwanStockTradingDate'})
+        cache.fetch_stock_news.assert_called_once_with('2330', now.date(), days=3)
+
+    def test_news_window_and_safe_links(self):
+        from main import analyze_news_rows
+        a = evaluate(bullish()); a.update(symbol='2330')
+        news = analyze_news_rows('2330', [dict(date='2026-10-07', title='<headline>', source='news', link='javascript:alert(1)')])
+        page = render([a], {}, '2026-10-07', 'now', Config(), [], {'2330': news})
+        self.assertIn('2026-10-05 至 2026-10-07', page)
+        self.assertIn('&lt;headline&gt;', page)
+        self.assertNotIn('javascript:', page)
 
     def test_configuration_file_valid(self):
         Config(**json.loads(Path(__file__).with_name('momentum_config.json').read_text())).validate()

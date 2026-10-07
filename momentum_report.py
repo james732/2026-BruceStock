@@ -11,7 +11,7 @@ from pathlib import Path
 import sys
 
 import requests
-from main import FinMindClient, TdccClient, TAIPEI_TIMEZONE, API_TOKEN, load_stock_ids
+from main import FinMindClient, TdccClient, TAIPEI_TIMEZONE, API_TOKEN, load_stock_ids, analyze_news_rows, safe_news_link
 from finmind_cache import CachedFinMindClient
 from momentum_scoring import Config, RULES, build_features, evaluate, number, normalize_shares
 
@@ -89,15 +89,19 @@ REASONS = {'missing_or_invalid': '必要資料缺漏、日期不連續、單位�
            'zero_volume': '均量為零，不能進行相對量判斷'}
 
 
-def render(results, names, as_of, generated_at, config, warnings):
+def render(results, names, as_of, generated_at, config, warnings, news=None):
     esc = lambda s: html.escape(str(s), quote=True)
     cards = []
+    news = news or {}
+    news_end = date.fromisoformat(as_of)
+    news_start = news_end - timedelta(days=2)
     complete = sorted([r for r in results if r['status'] == 'complete'], key=lambda r: (-r['raw_score'], r['symbol']))
     partial = sorted([r for r in results if r['status'] != 'complete'], key=lambda r: r['symbol'])
     for section, rows in [('完整資料排名', complete), ('資料不完整（不納入排名）', partial)]:
-        cards.append(f'<h2>{section}</h2>')
+        headers = ''.join(f'<th>{esc(label)}</th>' for label, _ in RULES.values())
+        cards.append(f'<h2>{section}</h2><div class="scroll"><table class="overview"><thead><tr><th>排名</th><th>個股</th><th>總分／小計</th>{headers}<th>資料完整度</th></tr></thead><tbody>')
         if not rows:
-            cards.append('<p>目前沒有符合此類別的股票。</p>')
+            cards.append('<tr><td colspan="15">目前沒有符合此類別的股票。</td></tr>')
         for i, r in enumerate(rows, 1):
             title = '總分' if r['status'] == 'complete' else '已知訊號小計'
             score = '無法計分' if r['score'] is None else str(r['score']) + ' 分'
@@ -113,20 +117,37 @@ def render(results, names, as_of, generated_at, config, warnings):
             prefix = str(i) + '. ' if r['status'] == 'complete' else ''
             color = 'positive' if (r['score'] or 0) > 0 else 'negative' if (r['score'] or 0) < 0 else ''
             provenance = r.get('provenance', {})
-            cards.append(f'''<article><div class="headline"><h3>{prefix}{esc(r['symbol'])} {esc(names.get(r['symbol'], ''))}</h3><strong class="{color}">{title}：{esc(score)}</strong></div>
-<p>行情截止：{esc(r.get('as_of', '未知'))} · 可判斷規則：{r['coverage']} · 核心 {r['positive_score']:+d}／加權 {r['bonus_score']:+d}／風險 {r['risk_score']:+d} · 原始分數 {esc(r['raw_score'])}</p>
+            row_id = 'stock-' + r['symbol']
+            cells = []
+            for x in r['rules']:
+                text = '缺資料' if x['state'] == 'unknown' else '停用' if x['state'] == 'disabled' else f"{x['contribution']:+d}"
+                if x['suppressed_by']:
+                    text += '（重疊）'
+                cells.append(f'<td>{esc(text)}</td>')
+            news_rows = []
+            for item in news.get(r['symbol'], []):
+                link = safe_news_link(item.link)
+                headline = f'<a href="{esc(link)}" target="_blank" rel="noopener noreferrer">{esc(item.title)}</a>' if link else esc(item.title)
+                news_rows.append(f'<tr><td>{esc(item.published_at)}</td><td>{esc(item.source)}</td><td>{headline}</td></tr>')
+            news_html = '<div class="scroll"><table><thead><tr><th>時間</th><th>來源</th><th>新聞標題</th></tr></thead><tbody>' + ''.join(news_rows) + '</tbody></table></div>' if news_rows else '<p>此期間沒有取得相關新聞。</p>'
+            cards.append(f'''<tr><td>{i if r['status'] == 'complete' else '—'}</td><td><button type="button" class="stock-toggle" aria-expanded="false" aria-controls="{esc(row_id)}">{esc(r['symbol'])} {esc(names.get(r['symbol'], ''))}</button></td><td class="{color}">{esc(score)}</td>{''.join(cells)}<td>{esc(r['coverage'])}</td></tr>
+<tr id="{esc(row_id)}" class="stock-detail" hidden><td colspan="15">
 <details><summary>查看 11 條評分規則與輸入值</summary><div class="scroll"><table><thead><tr><th>規則</th><th>預設條件</th><th>設定權重</th><th>判定</th><th>實際分數</th><th>輸入（股數、比例）</th></tr></thead><tbody>{''.join(details)}</tbody></table></div>
-<p>集保快照：{esc(', '.join(provenance.get('weekly_snapshot_dates', [])) or '缺資料')}；發布時序採本次取得時間，分母變更停止跨週比較。</p></details></article>''')
+<p>{title}：{esc(score)} · 行情截止：{esc(r.get('as_of', '未知'))} · 核心 {r['positive_score']:+d}／加權 {r['bonus_score']:+d}／風險 {r['risk_score']:+d} · 原始分數 {esc(r['raw_score'])}</p>
+<p>集保快照：{esc(', '.join(provenance.get('weekly_snapshot_dates', [])) or '缺資料')}；發布時序採本次取得時間，分母變更停止跨週比較。</p></details>
+<h3>近三日個股新聞（{news_start.isoformat()} 至 {news_end.isoformat()}）</h3>{news_html}</td></tr>''')
+        cards.append('</tbody></table></div>')
     config_json = esc(json.dumps(asdict(config), ensure_ascii=False, indent=2))
     warning_html = ''.join(f'<li>{esc(w)}</li>' for w in warnings)
     return f'''<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>評分v2</title>
-<style>body{{font-family:system-ui,sans-serif;max-width:1200px;margin:24px auto;padding:0 20px;background:#f5f7fa;color:#17263c}}nav{{display:flex;gap:20px;flex-wrap:wrap}}a{{color:#1255a1}}h1{{margin-bottom:8px}}article{{background:white;border:1px solid #cbd5e1;border-radius:8px;padding:18px;margin:16px 0}}.headline{{display:flex;gap:20px;justify-content:space-between;align-items:center;flex-wrap:wrap}}strong{{font-size:1.3rem}}.positive{{color:#a12628}}.negative{{color:#167047}}p,li{{line-height:1.7}}summary{{cursor:pointer;color:#1255a1}}.scroll{{overflow-x:auto}}table{{border-collapse:collapse;width:100%;font-size:.9rem;margin:16px 0}}td,th{{border:1px solid #cbd5e1;padding:10px;text-align:left;min-width:75px}}th{{background:#edf2f8}}pre{{white-space:pre-wrap;overflow-wrap:anywhere}}.notice{{padding:16px;background:#fff8dd;border-left:4px solid #aa7d00}}@media(max-width:600px){{body{{padding:0 12px}}}}</style></head><body>
+<style>body{{font-family:system-ui,sans-serif;max-width:1600px;margin:24px auto;padding:0 20px;background:#f5f7fa;color:#17263c}}nav{{display:flex;gap:20px;flex-wrap:wrap}}a{{color:#1255a1}}h1{{margin-bottom:8px}}article{{background:white;border:1px solid #cbd5e1;border-radius:8px;padding:18px;margin:16px 0}}.headline{{display:flex;gap:20px;justify-content:space-between;align-items:center;flex-wrap:wrap}}strong{{font-size:1.3rem}}.positive{{color:#a12628}}.negative{{color:#167047}}p,li{{line-height:1.7}}summary{{cursor:pointer;color:#1255a1}}.scroll{{overflow-x:auto}}table{{border-collapse:collapse;width:100%;font-size:.9rem;margin:16px 0}}td,th{{border:1px solid #cbd5e1;padding:10px;text-align:left;min-width:75px}}th{{background:#edf2f8}}.overview{{white-space:nowrap}}.stock-toggle{{border:0;background:none;color:#1255a1;font:inherit;cursor:pointer;text-align:left;text-decoration:underline}}.stock-detail>td{{background:#f8fafc;padding:20px;white-space:normal}}[hidden]{{display:none!important}}.overview>thead>tr>th{{position:sticky;top:0}}pre{{white-space:pre-wrap;overflow-wrap:anywhere}}.notice{{padding:16px;background:#fff8dd;border-left:4px solid #aa7d00}}@media(max-width:600px){{body{{padding:0 12px}}}}</style></head><body>
 <nav><a href="analysis.html">原版報告</a><a href="analysis_param.html">原版參數頁</a><a href="analysis_momentum.html" aria-current="page">評分v2</a></nav>
 <h1>評分v2</h1><p>查詢截止：{esc(as_of)} · 報告產生：{esc(generated_at)} · {esc(config.version)}</p>
 <div class="notice">從 0 分累加，五個核心模組各 +20、強勢加權 +15；總分可超過 100 或低於 0。預設放量轉弱與跌破三線只計較重的一筆，完整資料按原始分數排序。缺資料只顯示已知小計，不納入排名。</div>
 <p>法人與成交量使用相同交易日及原始股數；數值判斷不先四捨五入。價格採 FinMind 未還原收盤價，均線與五日報酬使用相同基準，除權息可能影響訊號。本頁為本次快照，未使用週資料製作歷史回測或勝率。</p>
 <ul>{warning_html}</ul>{''.join(cards)}
 <details><summary>查看實際參數設定</summary><p>上方條件欄說明預設值；自訂值以此設定與規則輸入為準。修改 momentum_config.json 後重新產生頁面。</p><pre>{config_json}</pre><p>Config SHA-256：{config.digest()}</p></details>
+<script>document.querySelectorAll('.stock-toggle').forEach(button=>button.addEventListener('click',()=>{{const row=document.getElementById(button.getAttribute('aria-controls'));const expanded=button.getAttribute('aria-expanded')==='true';button.setAttribute('aria-expanded',String(!expanded));row.hidden=expanded;}}));</script>
 </body></html>'''
 
 
@@ -159,6 +180,7 @@ def generate(stock_ids, end_date, remote, cache, tdcc, config, now):
         names = {}
         warnings.append('股票名稱取得失敗，使用代碼顯示。')
     results = []
+    news = {}
     for symbol in stock_ids:
         try:
             prices = cache.fetch('TaiwanStockPrice', symbol, start, as_of.isoformat())
@@ -179,8 +201,13 @@ def generate(stock_ids, end_date, remote, cache, tdcc, config, now):
             'weekly_observed_at': observed.isoformat(), 'cutoff_at': (observed if not historical else cutoff).isoformat(),
             'units': 'shares', 'price_basis': 'unadjusted-close'})
         results.append(result)
+        try:
+            news[symbol] = analyze_news_rows(symbol, cache.fetch_stock_news(symbol, end_date, days=3))
+        except REMOTE_ERRORS as e:
+            news[symbol] = []
+            warnings.append(symbol + ' 新聞資料取得失敗：' + type(e).__name__)
     warnings.extend(cache.warnings)
-    return render(results, names, end_date.isoformat(), now.isoformat(timespec='seconds'), config, warnings)
+    return render(results, names, end_date.isoformat(), now.isoformat(timespec='seconds'), config, warnings, news)
 
 
 def main():
