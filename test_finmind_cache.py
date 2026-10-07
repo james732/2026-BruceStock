@@ -97,14 +97,14 @@ class CacheTests(unittest.TestCase):
     def test_news_today_refreshes_and_historical_ttl(self):
         self.remote.fetch_stock_news.return_value = []
         self.client.fetch_stock_news("2330", self.now.date())
-        self.assertEqual(self.remote.fetch_stock_news.call_count, 7)
+        self.assertEqual(self.remote.fetch_stock_news.call_count, 3)
         self.remote.fetch_stock_news.reset_mock()
         self.client.fetch_stock_news("2330", self.now.date())
         self.remote.fetch_stock_news.assert_called_once_with("2330", self.now.date(), days=1)
         self.now += timedelta(days=1)
         self.remote.fetch_stock_news.reset_mock()
         self.client.fetch_stock_news("2330", date(2026, 10, 5))
-        self.assertEqual(self.remote.fetch_stock_news.call_count, 7)
+        self.assertEqual(self.remote.fetch_stock_news.call_count, 3)
 
     def test_news_failure_is_reported_without_failing_report(self):
         self.remote.fetch_stock_news.side_effect = RuntimeError("offline")

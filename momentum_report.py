@@ -119,10 +119,10 @@ def render(results, names, as_of, generated_at, config, warnings):
 <p>集保快照：{esc(', '.join(provenance.get('weekly_snapshot_dates', [])) or '缺資料')}；發布時序採本次取得時間，分母變更停止跨週比較。</p></details></article>''')
     config_json = esc(json.dumps(asdict(config), ensure_ascii=False, indent=2))
     warning_html = ''.join(f'<li>{esc(w)}</li>' for w in warnings)
-    return f'''<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bruce 動能評分</title>
+    return f'''<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>評分v2</title>
 <style>body{{font-family:system-ui,sans-serif;max-width:1200px;margin:24px auto;padding:0 20px;background:#f5f7fa;color:#17263c}}nav{{display:flex;gap:20px;flex-wrap:wrap}}a{{color:#1255a1}}h1{{margin-bottom:8px}}article{{background:white;border:1px solid #cbd5e1;border-radius:8px;padding:18px;margin:16px 0}}.headline{{display:flex;gap:20px;justify-content:space-between;align-items:center;flex-wrap:wrap}}strong{{font-size:1.3rem}}.positive{{color:#a12628}}.negative{{color:#167047}}p,li{{line-height:1.7}}summary{{cursor:pointer;color:#1255a1}}.scroll{{overflow-x:auto}}table{{border-collapse:collapse;width:100%;font-size:.9rem;margin:16px 0}}td,th{{border:1px solid #cbd5e1;padding:10px;text-align:left;min-width:75px}}th{{background:#edf2f8}}pre{{white-space:pre-wrap;overflow-wrap:anywhere}}.notice{{padding:16px;background:#fff8dd;border-left:4px solid #aa7d00}}@media(max-width:600px){{body{{padding:0 12px}}}}</style></head><body>
-<nav><a href="analysis.html">原版報告</a><a href="analysis_param.html">原版參數頁</a><a href="analysis_momentum.html" aria-current="page">Bruce 動能評分</a></nav>
-<h1>Bruce 動能評分</h1><p>查詢截止：{esc(as_of)} · 報告產生：{esc(generated_at)} · {esc(config.version)}</p>
+<nav><a href="analysis.html">原版報告</a><a href="analysis_param.html">原版參數頁</a><a href="analysis_momentum.html" aria-current="page">評分v2</a></nav>
+<h1>評分v2</h1><p>查詢截止：{esc(as_of)} · 報告產生：{esc(generated_at)} · {esc(config.version)}</p>
 <div class="notice">從 0 分累加，五個核心模組各 +20、強勢加權 +15；總分可超過 100 或低於 0。預設放量轉弱與跌破三線只計較重的一筆，完整資料按原始分數排序。缺資料只顯示已知小計，不納入排名。</div>
 <p>法人與成交量使用相同交易日及原始股數；數值判斷不先四捨五入。價格採 FinMind 未還原收盤價，均線與五日報酬使用相同基準，除權息可能影響訊號。本頁為本次快照，未使用週資料製作歷史回測或勝率。</p>
 <ul>{warning_html}</ul>{''.join(cards)}

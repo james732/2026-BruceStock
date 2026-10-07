@@ -165,7 +165,7 @@ class CachedFinMindClient:
     def fetch(self, dataset, stock_id, start_date, end_date):
         return self._query_days(dataset, stock_id, date.fromisoformat(start_date), date.fromisoformat(end_date))
 
-    def fetch_stock_news(self, stock_id, end_date, days=7):
+    def fetch_stock_news(self, stock_id, end_date, days=3):
         return self._query_days("TaiwanStockNews", stock_id, end_date - timedelta(days=days - 1), end_date, news=True)
 
     def fetch_stock_names(self, stock_ids):

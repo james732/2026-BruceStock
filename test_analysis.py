@@ -57,10 +57,10 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(format_volume(12_345.4), "12,345")
         self.assertEqual(format_volume(12_345.5), "12,346")
 
-    def test_news_query_dates_include_seven_calendar_days(self) -> None:
+    def test_news_query_dates_include_three_calendar_days(self) -> None:
         dates = news_query_dates(date(2026, 10, 2))
-        self.assertEqual(len(dates), 7)
-        self.assertEqual(dates[0], date(2026, 9, 26))
+        self.assertEqual(len(dates), 3)
+        self.assertEqual(dates[0], date(2026, 9, 30))
         self.assertEqual(dates[-1], date(2026, 10, 2))
 
     def test_news_analysis_deduplicates_links_and_sorts_newest_first(self) -> None:
@@ -291,9 +291,9 @@ class AnalysisTests(unittest.TestCase):
         self.assertIn("最近四週股價與持股分級", report)
         self.assertIn("＞400張～≤800張", report)
         self.assertIn("26W39", report)
-        self.assertIn("近七日個股新聞（2026-09-26 至 2026-10-02）", report)
+        self.assertIn("近三日個股新聞（2026-09-30 至 2026-10-02）", report)
         self.assertIn('href="https://example.com/news"', report)
-        self.assertLess(report.index("最近四週股價與持股分級"), report.index("近七日個股新聞"))
+        self.assertLess(report.index("最近四週股價與持股分級"), report.index("近三日個股新聞"))
         self.assertNotIn("<h2>最近五個交易日法人買賣</h2>", report)
         self.assertEqual(report.count("<table"), 4)
         self.assertEqual(report.count("<tbody"), 4)

@@ -126,7 +126,7 @@ class FinMindClient:
         return self._fetch_rows({"dataset": "TaiwanStockInfo"})
 
     def fetch_stock_news(
-        self, stock_id: str, end_date: date, days: int = 7
+        self, stock_id: str, end_date: date, days: int = 3
     ) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         for query_date in news_query_dates(end_date, days):
@@ -429,7 +429,7 @@ def analyze_weekly_holdings(
     return results
 
 
-def news_query_dates(end_date: date, days: int = 7) -> list[date]:
+def news_query_dates(end_date: date, days: int = 3) -> list[date]:
     if days < 1:
         raise ValueError("News query days must be at least 1")
     start_date = end_date - timedelta(days=days - 1)
@@ -674,7 +674,7 @@ def render_report(
     for item in stock_news:
         news_by_stock[item.stock_id].append(item)
     news_end_date = date.fromisoformat(requested_end_date)
-    news_start_date = news_end_date - timedelta(days=6)
+    news_start_date = news_end_date - timedelta(days=2)
 
     scores = {
         analysis.stock_id: (score_histories[analysis.stock_id][-1].score
@@ -887,7 +887,7 @@ def render_report(
       </div>
       <h3 class="holding-heading">最近四週股價與持股分級</h3>
       {holding_content}
-      <h3 class="news-heading">近七日個股新聞（{news_start_date.isoformat()} 至 {news_end_date.isoformat()}）</h3>
+      <h3 class="news-heading">近三日個股新聞（{news_start_date.isoformat()} 至 {news_end_date.isoformat()}）</h3>
       {news_content}
     </section>
   </td>
@@ -1029,7 +1029,7 @@ def render_report(
 </head>
 <body>
 <main>
-  <nav><a href="analysis.html">原版報告</a> · <a href="analysis_param.html">原版參數頁</a> · <a href="analysis_momentum.html">Bruce 動能評分</a></nav>
+  <nav><a href="analysis.html">原版報告</a> · <a href="analysis_param.html">原版參數頁</a> · <a href="analysis_momentum.html">評分v2</a></nav>
   <h1>台股法人、均線與成交量分析</h1>
   <ul class="meta">
     <li>查詢截止日：{html.escape(requested_end_date)}</li>
@@ -1170,7 +1170,7 @@ def run_analysis(
             start_date_text,
             end_date_text,
         )
-        news_rows = client.fetch_stock_news(stock_id, end_date, days=7)
+        news_rows = client.fetch_stock_news(stock_id, end_date, days=3)
         price_rows = [row for row in price_rows if str(row["date"]) <= end_date_text]
         institution_rows = [row for row in institution_rows if str(row["date"]) <= end_date_text]
         price_rows_by_stock[stock_id] = price_rows
