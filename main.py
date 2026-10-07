@@ -1029,6 +1029,7 @@ def render_report(
 </head>
 <body>
 <main>
+  <nav><a href="analysis.html">原版報告</a> · <a href="analysis_param.html">原版參數頁</a> · <a href="analysis_momentum.html">Bruce 動能評分</a></nav>
   <h1>台股法人、均線與成交量分析</h1>
   <ul class="meta">
     <li>查詢截止日：{html.escape(requested_end_date)}</li>

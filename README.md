@@ -133,3 +133,9 @@ uv run main.py
 
 原有 Windows 自動寄信排程仍是獨立設定；若你不希望本機繼續寄信，
 請停用 `FinMindTrade-WeekdayReport` 工作。雲端 workflow 不會修改本機排程。
+
+## Bruce 動能評分新頁面
+
+雲端新增 `analysis_momentum.html`，保留原報告並提供頁首切換。執行不寄信。
+本機另執行 `uv run momentum_report.py`；參數設定在 `momentum_config.json`。
+規則、資料映射、缺資料及重複扣分說明見 [MOMENTUM.md](MOMENTUM.md)。

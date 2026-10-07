@@ -1,5 +1,17 @@
 name: Generate stock report
 on:
+  push:
+    branches: [main]
+    paths:
+      - main.py
+      - finmind_cache.py
+      - score_history.py
+      - momentum_*.py
+      - momentum_config.json
+      - target.txt
+      - pyproject.toml
+      - uv.lock
+      - .github/workflows/report.yml
   workflow_dispatch:
     inputs:
       end_date:
@@ -49,9 +61,11 @@ jobs:
             args+=(--end-date "$END_DATE")
           fi
           uv run --frozen main.py --output public/analysis.html "${args[@]}"
+          uv run --frozen momentum_report.py --output public/analysis_momentum.html "${args[@]}"
           cp public/analysis.html public/index.html
           test -s public/index.html
           test -s public/analysis_param.html
+          test -s public/analysis_momentum.html
       - name: Save updated market data cache
         continue-on-error: true
         uses: actions/cache/save@v4
@@ -77,7 +91,7 @@ jobs:
           PAGES_ENABLED: ${{ vars.PAGES_ENABLED }}
         run: |
           echo "### Stock report generated" >> "$GITHUB_STEP_SUMMARY"
-          echo "Download both HTML reports from this run's artifact. No email was sent." >> "$GITHUB_STEP_SUMMARY"
+          echo "Download the legacy, adjustable and momentum HTML reports from this run's artifact. No email was sent." >> "$GITHUB_STEP_SUMMARY"
           if [[ "$PAGES_ENABLED" != "true" ]]; then
             echo "To publish: enable Settings > Pages > GitHub Actions, then set repository variable PAGES_ENABLED=true." >> "$GITHUB_STEP_SUMMARY"
           fi

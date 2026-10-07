@@ -1,0 +1,64 @@
+{
+  "version": "bruce-momentum-v1.0",
+  "weights": {
+    "P1": 20,
+    "P2": 20,
+    "P3": 20,
+    "P4": 20,
+    "P5": 20,
+    "B1": 15,
+    "N1": -20,
+    "N2": -25,
+    "N3": -30,
+    "N4": -15,
+    "N5": -30
+  },
+  "enabled": {
+    "P1": true,
+    "P2": true,
+    "P3": true,
+    "P4": true,
+    "P5": true,
+    "B1": true,
+    "N1": true,
+    "N2": true,
+    "N3": true,
+    "N4": true,
+    "N5": true
+  },
+  "short_ma": [
+    5,
+    10
+  ],
+  "long_ma": [
+    20,
+    60
+  ],
+  "weak_ma": [
+    5,
+    10
+  ],
+  "breakdown_ma": [
+    5,
+    10,
+    20
+  ],
+  "price_ma": 20,
+  "volume_days": 10,
+  "institutional_days": 10,
+  "sell_days": 5,
+  "return_days": 5,
+  "consecutive_changes": 2,
+  "buy_ratio": "0.03",
+  "growth_ratio": "1.0",
+  "shrink_ratio": "0.75",
+  "return_min": "0.05",
+  "whale_min": "0.60",
+  "delta_up": "0.001",
+  "delta_down": "0.001",
+  "delta_mid": "0.001",
+  "weekly_max_age_days": 14,
+  "shrink_inclusive": false,
+  "conflict_policy": "max_per_group",
+  "display_bounds": null
+}
