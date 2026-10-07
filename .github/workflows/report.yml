@@ -40,6 +40,35 @@ jobs:
       - run: uv sync --frozen
       - name: Run offline tests
         run: uv run --frozen python -m unittest -v
+      - name: Verify FinMind authorization without cache
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: |
+          uv run --frozen python - <<'PY'
+          import os
+          import sys
+          import requests
+          token = os.environ.get("FINMIND_TOKEN", "")
+          if not token or token != token.strip() or any(ch.isspace() for ch in token) or token.lower().startswith("bearer"):
+              print("FinMind token format invalid: paste the token only, without Bearer, quotes or whitespace.")
+              sys.exit(1)
+          response = requests.get(
+              "https://api.finmindtrade.com/api/v4/data",
+              headers={"Authorization": "Bearer " + token},
+              params={"dataset": "TaiwanStockInfo"},
+              timeout=30,
+          )
+          try:
+              payload = response.json()
+          except ValueError:
+              payload = {}
+          if response.status_code != 200 or payload.get("status") != 200 or not isinstance(payload.get("data"), list):
+              message = str(payload.get("msg", "No API error message"))
+              message = message.replace(token, "[REDACTED]")
+              print(f"FinMind authorization check failed: HTTP {response.status_code}; API status={payload.get('status')}; {message[:300]}")
+              sys.exit(1)
+          print("FinMind authorization check passed: fresh TaiwanStockInfo request succeeded.")
+          PY
       - name: Restore market data cache
         uses: actions/cache/restore@v4
         with:
