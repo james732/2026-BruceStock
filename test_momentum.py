@@ -264,6 +264,18 @@ class MomentumAdapterTests(unittest.TestCase):
         self.assertEqual(w[-1]['whale_ratio'],D('.61'))
         self.assertEqual(w[-1]['period_index']-w[0]['period_index'],1)
 
+    def test_weekly_changed_total_keeps_same_ratio_definition(self):
+        daily, _, dates, end, stamp = fixture()
+        snapshots = {end: {'2330': {12: 200, 13: 100, 15: 700, 17: 1000}},
+                     end - timedelta(days=7): {'2330': {12: 400, 13: 200, 15: 1300, 17: 2000}},
+                     end - timedelta(days=14): {'2330': {12: 100, 13: 50, 15: 300, 17: 500}}}
+        weeks = adapt_weekly('2330', snapshots, stamp)
+        features = build_features(daily, weeks, dates, end, stamp)
+        self.assertEqual(features['whale_delta_0'], D('.05'))
+        self.assertEqual(features['whale_delta_1'], D('.05'))
+        self.assertEqual(evaluate(features)['rules'][0]['state'], 'true')
+
+
 
 class MomentumPageTests(unittest.TestCase):
     def test_separate_sections_and_html_escape(self):
@@ -293,6 +305,8 @@ class MomentumPageTests(unittest.TestCase):
         s=generate(['2330'],now.date(),remote,cache,tdcc,Config(),now)
         self.assertIn('集保資料取得失敗',s)
         self.assertIn('無法計分',s)
+        self.assertIn('法人資料未齊',s)
+        self.assertIn('法人資料缺漏日期：2026-10-06',s)
         remote._fetch_rows.assert_called_once_with({'dataset':'TaiwanStockTradingDate'})
         cache.fetch_stock_news.assert_called_once_with('2330', now.date(), days=3)
 

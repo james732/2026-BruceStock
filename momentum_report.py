@@ -66,7 +66,8 @@ def adapt_weekly(symbol, snapshots, observed_at):
         mids = [number(levels.get(k), minimum=0) for k in (12, 13)]
         result.append(dict(snapshot_date=d, published_at=observed_at,
                            period_index=(d.toordinal() - d.weekday()) // 7,
-                           denominator_id='tdcc-level17:' + str(total),
+                           denominator_id='tdcc-level17-total-shares-v1',
+                           total_shares=total,
                            ratio_unit='ratio',
                            whale_ratio=whale / total if total and whale is not None else None,
                            mid_ratio=sum(mids) / total if total and all(x is not None for x in mids) else None))
@@ -86,7 +87,7 @@ CONDITIONS = {
 }
 REASONS = {'missing_or_invalid': '必要資料缺漏、日期不連續、單位不明或無法驗證',
            'weekly_unavailable_or_stale': '集保快照無法證明已取得、過期或重複',
-           'weekly_gap_or_noncomparable': '集保缺少相鄰週、比例失效或分母變更',
+           'weekly_gap_or_noncomparable': '集保缺少相鄰週、比例失效或統計口徑變更',
            'zero_volume': '均量為零，不能進行相對量判斷'}
 
 
@@ -106,6 +107,15 @@ def render(results, names, as_of, generated_at, config, warnings, news=None):
         for i, r in enumerate(rows, 1):
             title = '總分' if r['status'] == 'complete' else '已知訊號小計'
             score = '無法計分' if r['score'] is None else str(r['score']) + ' 分'
+            missing_ids = {x['id'] for x in r['rules'] if x['state'] == 'unknown'}
+            missing_labels = []
+            if missing_ids & {'P2', 'N1'}:
+                missing_labels.append('法人資料未齊')
+            if missing_ids & {'P1', 'N2', 'B1'}:
+                missing_labels.append('集保資料待確認')
+            if missing_ids - {'P2', 'N1', 'P1', 'N2', 'B1'}:
+                missing_labels.append('行情資料未齊')
+            missing_label = '、'.join(missing_labels) or '必要資料未齊'
             details = []
             for x in r['rules']:
                 state = {'true': '成立', 'false': '未成立', 'unknown': '缺資料', 'disabled': '停用'}[x['state']]
@@ -126,11 +136,11 @@ def render(results, names, as_of, generated_at, config, warnings, news=None):
                 summary = re.search(r'<tr class="stock-row".*?</tr>', original_row, re.S).group(0)
                 summary = summary.replace('institution-' + esc(r['symbol']), esc(row_id))
                 if r['status'] != 'complete':
-                    summary = re.sub(r'(<td class="score-cell[^>]*>).*?(</td>)', lambda m: m[1] + esc(score) + '（資料不完整）' + m[2], summary, count=1)
+                    summary = re.sub(r'(<td class="score-cell[^>]*>).*?(</td>)', lambda m: m[1] + esc(score) + '（' + esc(missing_label) + '）' + m[2], summary, count=1)
             else:
                 stock_label = esc(r['symbol'] + ' ' + names.get(r['symbol'], ''))
                 missing = ''.join('<td data-sort-value="">缺資料</td>' for _ in range(9))
-                summary = f'<tr class="stock-row" role="button" tabindex="0" aria-expanded="false" aria-controls="{esc(row_id)}" data-details-id="{esc(row_id)}"><td class="score-cell" data-sort-value="{r["score"] or 0}">{esc(score)}（資料不完整）</td><td class="stock-cell" data-sort-value="{stock_label}"><span class="toggle-indicator" aria-hidden="true">▶</span>{stock_label}</td>{missing}</tr>'
+                summary = f'<tr class="stock-row" role="button" tabindex="0" aria-expanded="false" aria-controls="{esc(row_id)}" data-details-id="{esc(row_id)}"><td class="score-cell" data-sort-value="{r["score"] or 0}">{esc(score)}（{esc(missing_label)}）</td><td class="stock-cell" data-sort-value="{stock_label}"><span class="toggle-indicator" aria-hidden="true">▶</span>{stock_label}</td>{missing}</tr>'
             news_rows = []
             for item in news.get(r['symbol'], []):
                 link = safe_news_link(item.link)
@@ -141,7 +151,7 @@ def render(results, names, as_of, generated_at, config, warnings, news=None):
 <tr id="{esc(row_id)}" class="institution-details stock-detail" hidden><td colspan="11"><section class="institution-panel">
 <details><summary>查看 11 條評分規則與輸入值</summary><div class="scroll"><table><thead><tr><th>規則</th><th>預設條件</th><th>設定權重</th><th>判定</th><th>實際分數</th><th>輸入（股數、比例）</th></tr></thead><tbody>{''.join(details)}</tbody></table></div>
 <p>{title}：{esc(score)} · 行情截止：{esc(r.get('as_of', '未知'))} · 核心 {r['positive_score']:+d}／加權 {r['bonus_score']:+d}／風險 {r['risk_score']:+d} · 原始分數 {esc(r['raw_score'])}</p>
-<p>集保快照：{esc(', '.join(provenance.get('weekly_snapshot_dates', [])) or '缺資料')}；發布時序採本次取得時間，分母變更停止跨週比較。</p></details>
+<p>集保快照：{esc(', '.join(provenance.get('weekly_snapshot_dates', [])) or '缺資料')}；發布時序採本次取得時間，各週以該週總股數計算持股比例；統計口徑一致且週次相鄰才比較。</p></details>
 <h3>近三日個股新聞（{news_start.isoformat()} 至 {news_end.isoformat()}）</h3>{news_html}</section></td></tr>''')
     cards.append('</tbody></table></div>')
     config_json = esc(json.dumps(asdict(config), ensure_ascii=False, indent=2))
@@ -200,8 +210,18 @@ def generate(stock_ids, end_date, remote, cache, tdcc, config, now):
             institutions = []
             warnings.append(symbol + ' 法人資料取得失敗：' + type(e).__name__)
         weeks = adapt_weekly(symbol, snapshots, observed)
-        features = build_features(adapt_daily(symbol, prices, institutions), weeks, dates, as_of,
+        daily = adapt_daily(symbol, prices, institutions)
+        features = build_features(daily, weeks, dates, as_of,
                                   observed if not historical else cutoff, config)
+        by_date = {row['date']: row for row in daily}
+        for rule, window, fields in (
+            ('P2', config.institutional_days, ('foreign', 'trust', 'dealer')),
+            ('N1', config.sell_days, ('foreign', 'trust')),
+        ):
+            missing_days = [d.isoformat() for d in dates[-window:]
+                            if any(by_date.get(d, {}).get(key + '_net_shares') is None for key in fields)]
+            if missing_days:
+                features['reasons'][rule] = '法人資料缺漏日期：' + '、'.join(missing_days) + '；需同期完整資料，不以零補值'
         result = evaluate(features, config)
         result.update(symbol=symbol, as_of=as_of.isoformat(), provenance={
             'weekly_snapshot_dates': sorted(d.isoformat() for d in snapshots),
