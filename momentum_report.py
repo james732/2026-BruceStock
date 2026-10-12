@@ -180,7 +180,7 @@ def render(results, names, as_of, generated_at, config, warnings, news=None):
     warning_html = ''.join(f'<li>{esc(w)}</li>' for w in warnings)
     return f'''<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>評分v2</title>
 <style>{original_style}.scroll{{overflow-x:auto}}details table{{white-space:normal}}details th{{position:static}}summary{{cursor:pointer;color:#1255a1}}pre{{white-space:pre-wrap;overflow-wrap:anywhere}}.notice{{padding:16px;background:#fff8dd;border-left:4px solid #aa7d00}}[hidden]{{display:none!important}}</style></head><body><main>
-<nav><a href="analysis.html">原版報告</a><a href="analysis_param.html">原版參數頁</a><a href="analysis_momentum.html" aria-current="page">評分v2</a></nav>
+<nav><a href="analysis.html">原版報告</a> · <a href="analysis_param.html">原版參數頁</a> · <a href="analysis_momentum.html" aria-current="page">評分v2</a></nav>
 <h1>評分v2</h1><p>查詢截止：{esc(as_of)} · 報告產生：{esc(generated_at)} · {esc(config.version)}</p>
 <div class="notice">從 0 分累加，五個核心模組各 +20、強勢加權 +15；總分可超過 100 或低於 0。預設放量轉弱與跌破三線只計較重的一筆，完整資料按原始分數排序。資料不完整（不納入排名），只顯示已知小計。</div>
 <p>法人與成交量使用相同交易日及原始股數；數值判斷不先四捨五入。價格採 FinMind 未還原收盤價，均線與五日報酬使用相同基準，除權息可能影響訊號。歷史總分採集保快照日期回算，發布時間未驗證；不提供投資回測或勝率。</p>
