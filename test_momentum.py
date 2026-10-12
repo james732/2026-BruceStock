@@ -383,6 +383,44 @@ class MomentumPageTests(unittest.TestCase):
         self.assertLess(page.index('<section class="score-history"'), page.index('近三日個股新聞'))
         self.assertIn('集保發布時間未驗證', page)
 
+    def test_ten_dated_rule_panels_match_each_history_score(self):
+        import re
+        daily, weeks, dates, end, stamp = fixture()
+        weeks.extend(dict(weeks[-1], snapshot_date=end-timedelta(days=7*i), period_index=100-i) for i in (3, 4))
+        current = evaluate(build_features(daily, weeks, dates, end, stamp))
+        details = []
+        history = analyze_momentum_history('2330', daily, weeks, dates, end, Config(), current, details)
+        self.assertEqual(len(details), 10)
+        for point, result in zip(history, details):
+            self.assertEqual(point.trading_date, result['as_of'])
+            self.assertEqual(point.score, result['score'] if result['status'] == 'complete' else None)
+            self.assertEqual(len(result['rules']), 11)
+            self.assertLessEqual(max(result['provenance']['weekly_snapshot_dates']), result['as_of'])
+        current.update(symbol='2330', as_of=end.isoformat(), score_history=history, history_rule_results=details)
+        page = render([current], {'2330':'台積電'}, end.isoformat(), 'now', Config(), [])
+        panels = re.findall(r'<details class="daily-rules".*?</details>', page, re.S)
+        self.assertEqual(len(panels), 10)
+        for panel, result in zip(panels, reversed(details)):
+            day = date.fromisoformat(result['as_of'])
+            self.assertIn(f'查看 {day.month}/{day.day} 的11條評分規則與輸入值', panel)
+            self.assertIn('行情截止：' + result['as_of'], panel)
+            self.assertEqual(panel.count('<tr><td>'), 11)
+            self.assertIn('原始分數 ' + str(result['raw_score']), panel)
+        self.assertNotEqual(details[-1]['rules'][2]['observed'], details[-2]['rules'][2]['observed'])
+
+    def test_partial_day_keeps_rules_and_missing_dates(self):
+        daily, weeks, dates, end, stamp = fixture()
+        daily[-2]['foreign_net_shares'] = None
+        current = evaluate(build_features(daily, weeks, dates, end, stamp))
+        details = []
+        history = analyze_momentum_history('2330', daily, weeks, dates, end, Config(), current, details)
+        self.assertIsNone(history[-2].score)
+        result = details[-2]
+        p2 = next(rule for rule in result['rules'] if rule['id'] == 'P2')
+        self.assertEqual(p2['state'], 'unknown')
+        self.assertIn(dates[-2].isoformat(), p2['reason'])
+        self.assertEqual(len(result['rules']), 11)
+
     def test_configuration_file_valid(self):
         Config(**json.loads(Path(__file__).with_name('momentum_config.json').read_text())).validate()
 

@@ -75,7 +75,7 @@ def adapt_weekly(symbol, snapshots, observed_at):
     return result
 
 
-def analyze_momentum_history(symbol, daily, weeks, dates, as_of, config, current_result):
+def analyze_momentum_history(symbol, daily, weeks, dates, as_of, config, current_result, rule_results=None):
     """Snapshot-date reconstruction; not a publication-time backtest."""
     reconstructed = [dict(w, published_at=datetime.combine(w['snapshot_date'], time.min, TAIPEI_TIMEZONE))
                      for w in weeks]
@@ -86,7 +86,23 @@ def analyze_momentum_history(symbol, daily, weeks, dates, as_of, config, current
         else:
             features = build_features(daily, reconstructed, dates, day,
                                       datetime.combine(day, time.max, TAIPEI_TIMEZONE), config)
+            by_date = {row['date']: row for row in daily}
+            for rule, window, fields in (
+                ('P2', config.institutional_days, ('foreign', 'trust', 'dealer')),
+                ('N1', config.sell_days, ('foreign', 'trust')),
+            ):
+                missing = [d.isoformat() for d in sorted(set(d for d in dates if d <= day))[-window:]
+                           if any(by_date.get(d, {}).get(key + '_net_shares') is None for key in fields)]
+                if missing:
+                    features['reasons'][rule] = '法人資料缺漏日期：' + '、'.join(missing) + '；需同期完整資料，不以零補值'
             result = evaluate(features, config)
+        if rule_results is not None:
+            rule_results.append(dict({key: value for key, value in result.items()
+                                      if key not in ('history_rule_results', 'score_history', 'price_analysis')},
+                                     as_of=day.isoformat(), provenance={
+                'weekly_snapshot_dates': sorted(w['snapshot_date'].isoformat() for w in weeks if w['snapshot_date'] <= day),
+                'history_basis': '本次取得時間' if day == as_of else '快照日期回算（發布時間未驗證）',
+            }))
         # A known subtotal must never masquerade as a complete historical score.
         score = result['score'] if result['status'] == 'complete' else None
         days.append(ScoreDay(symbol, day.isoformat(), None, score))
@@ -108,6 +124,26 @@ REASONS = {'missing_or_invalid': '必要資料缺漏、日期不連續、單位�
            'weekly_unavailable_or_stale': '集保快照無法證明已取得、過期或重複',
            'weekly_gap_or_noncomparable': '集保缺少相鄰週、比例失效或統計口徑變更',
            'zero_volume': '均量為零，不能進行相對量判斷'}
+
+
+def render_rule_details(result, label):
+    esc = lambda value: html.escape(str(value), quote=True)
+    details = []
+    for x in result['rules']:
+        state = {'true': '成立', 'false': '未成立', 'unknown': '缺資料', 'disabled': '停用'}[x['state']]
+        if x['suppressed_by']:
+            state += '；重疊扣分由 ' + x['suppressed_by'] + ' 計入'
+        if x['reason']:
+            state += '；' + REASONS.get(x['reason'], x['reason'])
+        observed = '；'.join(f'{k}={v if v is not None else "缺資料"}' for k, v in x['observed'].items())
+        details.append(f'<tr><td>{x["id"]} {esc(x["label"])}</td><td>{esc(CONDITIONS[x["id"]])}</td><td>{x["weight"]:+d}</td><td>{esc(state)}</td><td>{x["contribution"]:+d}</td><td>{esc(observed)}</td></tr>')
+    title = '總分' if result['status'] == 'complete' else '已知訊號小計'
+    score = '無法計分' if result['score'] is None else str(result['score']) + ' 分'
+    provenance = result.get('provenance', {})
+    return f'''<details class="daily-rules" data-score-date="{esc(result.get('as_of', ''))}"><summary>{esc(label)}</summary>
+<div class="scroll"><table><thead><tr><th>規則</th><th>預設條件</th><th>設定權重</th><th>判定</th><th>實際分數</th><th>輸入（股數、比例）</th></tr></thead><tbody>{''.join(details)}</tbody></table></div>
+<p>{title}：{esc(score)} · 行情截止：{esc(result.get('as_of', '未知'))} · 核心 {result['positive_score']:+d}／加權 {result['bonus_score']:+d}／風險 {result['risk_score']:+d} · 原始分數 {esc(result['raw_score'])}</p>
+<p>集保快照：{esc(', '.join(provenance.get('weekly_snapshot_dates', [])) or '缺資料')}；{esc(provenance.get('history_basis', '本次取得時間'))}。各週以該週總股數計算持股比例；統計口徑一致且週次相鄰才比較。</p></details>'''
 
 
 def render(results, names, as_of, generated_at, config, warnings, news=None):
@@ -135,15 +171,13 @@ def render(results, names, as_of, generated_at, config, warnings, news=None):
             if missing_ids - {'P2', 'N1', 'P1', 'N2', 'B1'}:
                 missing_labels.append('行情資料未齊')
             missing_label = '、'.join(missing_labels) or '必要資料未齊'
-            details = []
-            for x in r['rules']:
-                state = {'true': '成立', 'false': '未成立', 'unknown': '缺資料', 'disabled': '停用'}[x['state']]
-                if x['suppressed_by']:
-                    state += '；重疊扣分由 ' + x['suppressed_by'] + ' 計入'
-                if x['reason']:
-                    state += '；' + REASONS.get(x['reason'], x['reason'])
-                observed = '；'.join(f'{k}={v if v is not None else "缺資料"}' for k, v in x['observed'].items())
-                details.append(f'<tr><td>{x["id"]} {esc(x["label"])}</td><td>{esc(CONDITIONS[x["id"]])}</td><td>{x["weight"]:+d}</td><td>{esc(state)}</td><td>{x["contribution"]:+d}</td><td>{esc(observed)}</td></tr>')
+            daily_results = r.get('history_rule_results', [])
+            if daily_results:
+                rule_details = ''.join(render_rule_details(day_result,
+                    f"查看 {date.fromisoformat(day_result['as_of']).month}/{date.fromisoformat(day_result['as_of']).day} 的11條評分規則與輸入值")
+                    for day_result in reversed(daily_results))
+            else:
+                rule_details = render_rule_details(r, '查看 11 條評分規則與輸入值')
             prefix = str(i) + '. ' if r['status'] == 'complete' else ''
             color = 'positive' if (r['score'] or 0) > 0 else 'negative' if (r['score'] or 0) < 0 else ''
             provenance = r.get('provenance', {})
@@ -170,9 +204,7 @@ def render(results, names, as_of, generated_at, config, warnings, news=None):
                 note='依各日行情、法人與截至該日的集保快照日期回算評分v2；集保發布時間未驗證，可能包含當日尚未公開資料，不代表當時可取得的分數或投資回測。任一啟用規則缺資料即標示資料不足並中斷折線。')
             cards.append(f'''{summary}
 <tr id="{esc(row_id)}" class="institution-details stock-detail" hidden><td colspan="11"><section class="institution-panel">
-<details><summary>查看 11 條評分規則與輸入值</summary><div class="scroll"><table><thead><tr><th>規則</th><th>預設條件</th><th>設定權重</th><th>判定</th><th>實際分數</th><th>輸入（股數、比例）</th></tr></thead><tbody>{''.join(details)}</tbody></table></div>
-<p>{title}：{esc(score)} · 行情截止：{esc(r.get('as_of', '未知'))} · 核心 {r['positive_score']:+d}／加權 {r['bonus_score']:+d}／風險 {r['risk_score']:+d} · 原始分數 {esc(r['raw_score'])}</p>
-<p>集保快照：{esc(', '.join(provenance.get('weekly_snapshot_dates', [])) or '缺資料')}；發布時序採本次取得時間，各週以該週總股數計算持股比例；統計口徑一致且週次相鄰才比較。</p></details>
+{rule_details}
 {history_html}
 <h3>近三日個股新聞（{news_start.isoformat()} 至 {news_end.isoformat()}）</h3>{news_html}</section></td></tr>''')
     cards.append('</tbody></table></div>')
@@ -253,7 +285,8 @@ def generate(stock_ids, end_date, remote, cache, tdcc, config, now):
             result['price_analysis'] = analyze_price_rows(symbol, prices)
         except (ValueError, KeyError, TypeError):
             result['price_analysis'] = None
-        result['score_history'] = analyze_momentum_history(symbol, daily, weeks, dates, as_of, config, result)
+        result['history_rule_results'] = []
+        result['score_history'] = analyze_momentum_history(symbol, daily, weeks, dates, as_of, config, result, result['history_rule_results'])
         results.append(result)
         try:
             news[symbol] = analyze_news_rows(symbol, cache.fetch_stock_news(symbol, end_date, days=3))
