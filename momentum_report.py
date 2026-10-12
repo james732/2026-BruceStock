@@ -13,6 +13,7 @@ import sys
 
 import requests
 from main import FinMindClient, TdccClient, TAIPEI_TIMEZONE, API_TOKEN, load_stock_ids, analyze_news_rows, safe_news_link, analyze_price_rows, render_report, ScoreDay
+from score_history import render_history
 from finmind_cache import CachedFinMindClient
 from momentum_scoring import Config, RULES, build_features, evaluate, number, normalize_shares
 
@@ -72,6 +73,24 @@ def adapt_weekly(symbol, snapshots, observed_at):
                            whale_ratio=whale / total if total and whale is not None else None,
                            mid_ratio=sum(mids) / total if total and all(x is not None for x in mids) else None))
     return result
+
+
+def analyze_momentum_history(symbol, daily, weeks, dates, as_of, config, current_result):
+    """Snapshot-date reconstruction; not a publication-time backtest."""
+    reconstructed = [dict(w, published_at=datetime.combine(w['snapshot_date'], time.min, TAIPEI_TIMEZONE))
+                     for w in weeks]
+    days = []
+    for day in sorted(set(d for d in dates if d <= as_of))[-10:]:
+        if day == as_of:
+            result = current_result
+        else:
+            features = build_features(daily, reconstructed, dates, day,
+                                      datetime.combine(day, time.max, TAIPEI_TIMEZONE), config)
+            result = evaluate(features, config)
+        # A known subtotal must never masquerade as a complete historical score.
+        score = result['score'] if result['status'] == 'complete' else None
+        days.append(ScoreDay(symbol, day.isoformat(), None, score))
+    return days
 
 
 CONDITIONS = {
@@ -147,11 +166,14 @@ def render(results, names, as_of, generated_at, config, warnings, news=None):
                 headline = f'<a href="{esc(link)}" target="_blank" rel="noopener noreferrer">{esc(item.title)}</a>' if link else esc(item.title)
                 news_rows.append(f'<tr><td>{esc(item.published_at)}</td><td>{esc(item.source)}</td><td>{headline}</td></tr>')
             news_html = '<div class="scroll"><table><thead><tr><th>時間</th><th>來源</th><th>新聞標題</th></tr></thead><tbody>' + ''.join(news_rows) + '</tbody></table></div>' if news_rows else '<p>此期間沒有取得相關新聞。</p>'
+            history_html = render_history(r.get('score_history', []), r['symbol'] + ' ' + names.get(r['symbol'], ''),
+                note='依各日行情、法人與截至該日的集保快照日期回算評分v2；集保發布時間未驗證，可能包含當日尚未公開資料，不代表當時可取得的分數或投資回測。任一啟用規則缺資料即標示資料不足並中斷折線。')
             cards.append(f'''{summary}
 <tr id="{esc(row_id)}" class="institution-details stock-detail" hidden><td colspan="11"><section class="institution-panel">
 <details><summary>查看 11 條評分規則與輸入值</summary><div class="scroll"><table><thead><tr><th>規則</th><th>預設條件</th><th>設定權重</th><th>判定</th><th>實際分數</th><th>輸入（股數、比例）</th></tr></thead><tbody>{''.join(details)}</tbody></table></div>
 <p>{title}：{esc(score)} · 行情截止：{esc(r.get('as_of', '未知'))} · 核心 {r['positive_score']:+d}／加權 {r['bonus_score']:+d}／風險 {r['risk_score']:+d} · 原始分數 {esc(r['raw_score'])}</p>
 <p>集保快照：{esc(', '.join(provenance.get('weekly_snapshot_dates', [])) or '缺資料')}；發布時序採本次取得時間，各週以該週總股數計算持股比例；統計口徑一致且週次相鄰才比較。</p></details>
+{history_html}
 <h3>近三日個股新聞（{news_start.isoformat()} 至 {news_end.isoformat()}）</h3>{news_html}</section></td></tr>''')
     cards.append('</tbody></table></div>')
     config_json = esc(json.dumps(asdict(config), ensure_ascii=False, indent=2))
@@ -161,7 +183,7 @@ def render(results, names, as_of, generated_at, config, warnings, news=None):
 <nav><a href="analysis.html">原版報告</a><a href="analysis_param.html">原版參數頁</a><a href="analysis_momentum.html" aria-current="page">評分v2</a></nav>
 <h1>評分v2</h1><p>查詢截止：{esc(as_of)} · 報告產生：{esc(generated_at)} · {esc(config.version)}</p>
 <div class="notice">從 0 分累加，五個核心模組各 +20、強勢加權 +15；總分可超過 100 或低於 0。預設放量轉弱與跌破三線只計較重的一筆，完整資料按原始分數排序。資料不完整（不納入排名），只顯示已知小計。</div>
-<p>法人與成交量使用相同交易日及原始股數；數值判斷不先四捨五入。價格採 FinMind 未還原收盤價，均線與五日報酬使用相同基準，除權息可能影響訊號。本頁為本次快照，未使用週資料製作歷史回測或勝率。</p>
+<p>法人與成交量使用相同交易日及原始股數；數值判斷不先四捨五入。價格採 FinMind 未還原收盤價，均線與五日報酬使用相同基準，除權息可能影響訊號。歷史總分採集保快照日期回算，發布時間未驗證；不提供投資回測或勝率。</p>
 <ul>{warning_html}</ul>{''.join(cards)}
 <details><summary>查看實際參數設定</summary><p>上方條件欄說明預設值；自訂值以此設定與規則輸入為準。修改 momentum_config.json 後重新產生頁面。</p><pre>{config_json}</pre><p>Config SHA-256：{config.digest()}</p></details>
 </main><script>{original_script}</script>
@@ -231,6 +253,7 @@ def generate(stock_ids, end_date, remote, cache, tdcc, config, now):
             result['price_analysis'] = analyze_price_rows(symbol, prices)
         except (ValueError, KeyError, TypeError):
             result['price_analysis'] = None
+        result['score_history'] = analyze_momentum_history(symbol, daily, weeks, dates, as_of, config, result)
         results.append(result)
         try:
             news[symbol] = analyze_news_rows(symbol, cache.fetch_stock_news(symbol, end_date, days=3))

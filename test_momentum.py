@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 
 from main import TAIPEI_TIMEZONE
 from momentum_scoring import Config, RULES, evaluate, build_features, normalize_shares
-from momentum_report import adapt_daily, adapt_weekly, render, generate, main
+from momentum_report import adapt_daily, adapt_weekly, render, generate, main, analyze_momentum_history
 
 
 def bullish():
@@ -334,6 +334,54 @@ class MomentumPageTests(unittest.TestCase):
         self.assertIn('2026-10-05 至 2026-10-07', page)
         self.assertIn('&lt;headline&gt;', page)
         self.assertNotIn('javascript:', page)
+
+    def test_history_uses_v2_rules_and_last_ten_trading_dates(self):
+        daily, weeks, dates, end, stamp = fixture()
+        weeks.extend(dict(weeks[-1], snapshot_date=end-timedelta(days=7*i), period_index=100-i) for i in (3, 4))
+        current = evaluate(build_features(daily, weeks, dates, end, stamp))
+        history = analyze_momentum_history('2330', daily, weeks, dates, end, Config(), current)
+        self.assertEqual([d.trading_date for d in history], [d.isoformat() for d in dates[-10:]])
+        self.assertEqual(history[-1].score, current['score'])
+        previous = dates[-2]
+        reconstructed = [dict(w, published_at=datetime.combine(w['snapshot_date'], datetime.min.time(), TAIPEI_TIMEZONE)) for w in weeks]
+        expected = evaluate(build_features(daily, reconstructed, dates, previous, stamp))
+        self.assertEqual(history[-2].score, expected['score'])
+        changed = copy.deepcopy(daily)
+        changed[-1]['close'] = '99999'
+        again = analyze_momentum_history('2330', changed, weeks, dates, end, Config(), current)
+        self.assertEqual(history[:-1], again[:-1])
+
+    def test_history_missing_data_is_gap_and_never_subtotal(self):
+        daily, weeks, dates, end, stamp = fixture()
+        weeks.extend(dict(weeks[-1], snapshot_date=end-timedelta(days=7*i), period_index=100-i) for i in (3, 4))
+        current = evaluate(build_features(daily, weeks, dates, end, stamp))
+        history = analyze_momentum_history('2330', daily, weeks, dates, end, Config(), current)
+        self.assertIsNotNone(history[-2].score)
+        daily[-2]['foreign_net_shares'] = None
+        partial = evaluate(build_features(daily, weeks, dates, end, stamp))
+        history = analyze_momentum_history('2330', daily, weeks, dates, end, Config(), partial)
+        self.assertIsNone(history[-2].score)
+        self.assertIsNone(history[-1].score)
+
+    def test_history_chart_supports_negative_and_over_100(self):
+        from score_history import ScoreDay, render_history
+        history = [ScoreDay('2330', '2026-10-05', None, -90),
+                   ScoreDay('2330', '2026-10-06', None, None),
+                   ScoreDay('2330', '2026-10-07', None, 115)]
+        chart = render_history(history, '台積電', note='評分v2')
+        self.assertIn('>120</text>', chart)
+        self.assertIn('>-100</text>', chart)
+        self.assertIn('資料不足', chart)
+        import re
+        path = re.search(r'class="history-line" d="([^"]*)"', chart).group(1)
+        self.assertEqual(path.count('M'), 2)
+        self.assertNotIn('L', path)
+        result = evaluate(bullish()); result.update(symbol='2330', score_history=history)
+        page = render([result], {'2330':'台積電'}, '2026-10-07', 'now', Config(), [])
+        self.assertIn('最近 10 個交易日總分', page)
+        self.assertLess(page.index('查看 11 條評分規則與輸入值'), page.index('<section class="score-history"'))
+        self.assertLess(page.index('<section class="score-history"'), page.index('近三日個股新聞'))
+        self.assertIn('集保發布時間未驗證', page)
 
     def test_configuration_file_valid(self):
         Config(**json.loads(Path(__file__).with_name('momentum_config.json').read_text())).validate()

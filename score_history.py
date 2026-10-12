@@ -18,16 +18,18 @@ def score_color(score):
     return "#b42318" if score >= 80 else "#067647" if score < 70 else "#17202a"
 
 
-def render_history(days: list[ScoreDay], label: str) -> str:
+def render_history(days: list[ScoreDay], label: str, *, note: str | None = None) -> str:
     if not days:
         return '<h3>最近 10 個交易日總分</h3><p>尚無歷史分數資料。</p>'
     minimum = min([0] + [day.score for day in days if day.score is not None])
     low = (minimum // 20) * 20
-    y = lambda score: 210 - (score - low) / (100 - low) * 180
+    maximum = max([100] + [day.score for day in days if day.score is not None])
+    high = ((maximum + 19) // 20) * 20
+    y = lambda score: 210 - (score - low) / (high - low) * 180
     x = lambda index: 55 + index * 720 / max(1, len(days) - 1)
     parts = []
     for index in range(5):
-        value = low + (100 - low) * index / 4
+        value = low + (high - low) * index / 4
         position = y(value)
         parts.append(f'<line x1="55" x2="775" y1="{position:g}" y2="{position:g}" stroke="#e4e7ec"/>')
         parts.append(f'<text class="history-tick" x="45" y="{position + 4:g}" text-anchor="end">{value:g}</text>')
@@ -50,7 +52,7 @@ def render_history(days: list[ScoreDay], label: str) -> str:
     cells = ''.join(f'<td class="history-value" style="color:{score_color(day.score) if day.score is not None else "#667085"}">{day.score if day.score is not None else "資料不足"}</td>' for day in days)
     return f'''<section class="score-history" data-history="{payload}">
       <h3>最近 10 個交易日總分</h3>
-      <p>依各交易日當時資料回算；行情不足 60 筆時標示資料不足。實際顯示 {len(days)} 個交易日。</p>
+      <p>{html.escape(note or "依各交易日當時資料回算；行情不足 60 筆時標示資料不足。")}實際顯示 {len(days)} 個交易日。</p>
       <div class="nested-table-wrap"><svg class="history-chart" viewBox="0 0 820 260" role="img" aria-label="{html.escape(label, quote=True)} 最近 10 個交易日總分折線圖">
       <title>{html.escape(label)} 歷史總分；每日數值列於下方表格</title>
       <text x="12" y="16">總分</text>{''.join(parts)}<text x="790" y="253" text-anchor="end">交易日期</text></svg></div>
@@ -105,3 +107,4 @@ HISTORY_SCRIPT = """
     });
   }
 """
+
