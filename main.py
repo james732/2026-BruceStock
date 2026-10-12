@@ -292,7 +292,7 @@ def load_stock_ids(path: Path) -> list[str]:
     seen: set[str] = set()
     for raw_line in path.read_text(encoding="utf-8-sig").splitlines():
         candidate = raw_line.strip()
-        if re.fullmatch(r"\d{4,6}", candidate) and candidate not in seen:
+        if re.fullmatch(r"\d{4,6}[A-Z]?", candidate) and candidate not in seen:
             stock_ids.append(candidate)
             seen.add(candidate)
     if not stock_ids:
