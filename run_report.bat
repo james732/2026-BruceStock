@@ -27,10 +27,20 @@ if not exist "analysis_param.html" (
     echo [%DATE% %TIME%] ERROR: analysis_param.html is missing. Email skipped.
     exit /b 1
 )
-"%UV_EXE%" run mail_report.py --report analysis.html --non-interactive
+"%UV_EXE%" run momentum_report.py
+if errorlevel 1 (
+    echo [%DATE% %TIME%] ERROR: V2 report generation failed. Email skipped.
+    exit /b 1
+)
+if not exist "analysis_momentum.html" (
+    echo [%DATE% %TIME%] ERROR: analysis_momentum.html is missing. Email skipped.
+    exit /b 1
+)
+"%UV_EXE%" run mail_report.py --report analysis_momentum.html --non-interactive
 if errorlevel 1 (
     echo [%DATE% %TIME%] ERROR: Email delivery failed.
     exit /b 1
 )
 echo [%DATE% %TIME%] Report sent successfully.
 exit /b 0
+

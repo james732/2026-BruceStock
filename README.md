@@ -76,8 +76,7 @@ API token 由環境變數 `FINMIND_TOKEN` 提供；未設定時會停止產生�
 `mail_report.py` 預設只附上 `analysis_momentum.html`，測試收件人為 `james732@gmail.com`；
 不再要求或附上 `analysis_param.html`。內文列出評分v2總分，缺資料另列已知小計。
 指定 `--report` 時只附該檔案，指定 `--recipient` 可覆寫收件人。
-`run_report.bat` 是既有本機流程，仍先產生原版報告；使用新版寄信程式前須另行
-執行 `uv run momentum_report.py` 產生 v2，或指定已產生的 v2 路徑。
+`run_report.bat` 先產生原版與 v2，成功後只寄出 v2。任一產生步驟失敗時不寄信。
 
 首次使用或 Gmail 授權失效時，在 PowerShell 執行下列指令完成授權（不會寄信）：
 
