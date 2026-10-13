@@ -19,7 +19,7 @@ on:
         required: false
         type: string
   schedule:
-    - cron: "0 12 * * 1-5" # Monday-Friday 20:00 Asia/Taipei
+    - cron: "0 12 * * *" # Daily 20:00 Asia/Taipei (UTC+8)
 permissions:
   contents: read
 concurrency:
