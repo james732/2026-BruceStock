@@ -20,7 +20,7 @@ on:
         required: false
         type: string
       send_email:
-        description: "Send v2 HTML via Gmail after report generation"
+        description: "Send v2 HTML via Gmail after successful website deployment"
         required: false
         type: boolean
         default: false
@@ -28,7 +28,7 @@ on:
         description: "Gmail recipient (used only when send_email is selected)"
         required: false
         type: string
-        default: "james732@gmail.com"
+        default: "bruce.sy.chen@gmail.com"
   schedule:
     - cron: "0 12 * * *" # Daily 20:00 Asia/Taipei (UTC+8)
 permissions:
@@ -152,13 +152,14 @@ jobs:
         uses: actions/deploy-pages@v4
 
   email:
-    # The exact commit message below authorizes this one requested test send.
-    # Normal pushes and schedules do not send email. Re-runs do not resend.
+    # Daily schedules send after successful deployment. Manual sends remain opt-in.
+    # Normal pushes and re-runs do not send email.
     if: >-
       github.run_attempt == 1 &&
-      ((github.event_name == 'workflow_dispatch' && inputs.send_email) ||
-       (github.event_name == 'push' && github.event.head_commit.message == '[gmail-test-20261013] Send v2 report to james732@gmail.com'))
-    needs: generate
+      needs.deploy.result == 'success' &&
+      (github.event_name == 'schedule' ||
+       (github.event_name == 'workflow_dispatch' && inputs.send_email))
+    needs: [generate, deploy]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -173,7 +174,7 @@ jobs:
         env:
           GMAIL_CLIENT_SECRET_JSON: ${{ secrets.GMAIL_CLIENT_SECRET_JSON }}
           GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
-          RECIPIENT: ${{ inputs.recipient || 'james732@gmail.com' }}
+          RECIPIENT: ${{ github.event_name == 'schedule' && 'bruce.sy.chen@gmail.com' || inputs.recipient || 'bruce.sy.chen@gmail.com' }}
         shell: bash
         run: |
           set -euo pipefail
