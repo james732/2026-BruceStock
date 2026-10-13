@@ -3,6 +3,7 @@ import base64
 import json
 import mimetypes
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from email.message import EmailMessage
 from html.parser import HTMLParser
 from pathlib import Path
@@ -15,9 +16,9 @@ from googleapiclient.errors import HttpError
 
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
-DEFAULT_RECIPIENT = "bruce.sy.chen@gmail.com"
-DEFAULT_REPORT = "analysis.html"
-PARAM_REPORT = "analysis_param.html"
+DEFAULT_RECIPIENT = "james732@gmail.com"
+DEFAULT_REPORT = "analysis_momentum.html"
+REPORT_URL = "https://james732.github.io/2026-BruceStock/analysis_momentum.html"
 TOKEN_FILE = "gmail_token.json"
 
 
@@ -25,6 +26,7 @@ class ReportScoreParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
         self.scores: list[tuple[int, str, str]] = []
+        self.partial_scores: list[tuple[int, str, str]] = []
         self._current: dict[str, str] | None = None
         self._text_target: str | None = None
 
@@ -37,10 +39,17 @@ class ReportScoreParser(HTMLParser):
             self._current = {}
         elif self._current is not None and tag == "td" and "score-cell" in classes:
             self._current["score"] = attributes.get("data-sort-value") or ""
+            self._text_target = "score_text"
+        elif self._current is not None and tag == "td" and "stock-cell" in classes:
+            label = (attributes.get("data-sort-value") or "").split(" ", 1)
+            self._current["stock_id"] = label[0]
+            self._current["stock_name"] = label[1] if len(label) > 1 else ""
         elif self._current is not None and tag == "span":
             if "stock-code" in classes:
+                self._current["stock_id"] = ""
                 self._text_target = "stock_id"
             elif "stock-name" in classes:
+                self._current["stock_name"] = ""
                 self._text_target = "stock_name"
 
     def handle_data(self, data: str) -> None:
@@ -50,7 +59,7 @@ class ReportScoreParser(HTMLParser):
             )
 
     def handle_endtag(self, tag: str) -> None:
-        if tag == "span":
+        if tag in ("span", "td"):
             self._text_target = None
         elif tag == "tr" and self._current is not None:
             try:
@@ -61,7 +70,8 @@ class ReportScoreParser(HTMLParser):
                 self._current = None
                 return
             if stock_id:
-                self.scores.append((score, stock_id, stock_name))
+                target = self.scores if self._current.get("score_text", "").strip() == str(score) else self.partial_scores
+                target.append((score, stock_id, stock_name))
             self._current = None
 
 
@@ -69,13 +79,14 @@ def extract_report_scores(report_html: str) -> list[tuple[int, str, str]]:
     parser = ReportScoreParser()
     parser.feed(report_html)
     if not parser.scores:
-        raise ValueError("The report contains no overview scores; regenerate analysis.html first.")
+        raise ValueError("The report contains no overview scores; regenerate the report first.")
     return sorted(parser.scores, key=lambda item: (-item[0], item[1]))
 
 
 def build_email_body(
     scores: list[tuple[int, str, str]], modified_time: datetime,
     report_name: str = DEFAULT_REPORT,
+    partial_scores: list[tuple[int, str, str]] | None = None,
 ) -> str:
     score_lines = [
         f"{rank}. {stock_id} {stock_name}：{score} 分"
@@ -83,13 +94,19 @@ def build_email_body(
     ]
     return "\n".join(
         [
-            "台股分析報告總分（由高至低）",
+            "台股分析報告 — 評分v2",
+            "完整資料總分（由高至低）：",
             "",
-            *score_lines,
+            *(score_lines or ["目前沒有可完整評分的個股。"]),
+            *(["", "資料不完整（不納入排名，僅列已知小計）："] + [
+                f"{stock_id} {stock_name}：已知小計 {score} 分"
+                for score, stock_id, stock_name in partial_scores
+            ] if partial_scores else []),
             "",
             f"報告產生時間：{modified_time:%Y-%m-%d %H:%M:%S}",
             f"完整報告請見附件 {report_name}。",
-            f"可調整評分參數的報告請見附件 {PARAM_REPORT}，請下載後以瀏覽器開啟。",
+            "附件請下載後以瀏覽器開啟。",
+            f"線上報告：{REPORT_URL}",
         ]
     )
 
@@ -130,20 +147,20 @@ def load_credentials(client_secret: Path, token_path: Path, non_interactive: boo
 
 
 def build_message(report_path: Path, recipient: str, subject: str) -> EmailMessage:
-    param_path = report_path.with_name(PARAM_REPORT)
-    if report_path.resolve() == param_path.resolve():
-        raise ValueError("--report must be the main report, not analysis_param.html")
-    param_bytes = param_path.read_bytes()
-    modified_time = datetime.fromtimestamp(report_path.stat().st_mtime)
+    modified_time = datetime.fromtimestamp(report_path.stat().st_mtime, ZoneInfo("Asia/Taipei"))
     report_bytes = report_path.read_bytes()
-    scores = extract_report_scores(report_bytes.decode("utf-8-sig"))
+    parser = ReportScoreParser()
+    parser.feed(report_bytes.decode("utf-8-sig"))
+    if not parser.scores and not parser.partial_scores:
+        raise ValueError("The report contains no overview scores; regenerate the report first.")
+    scores = sorted(parser.scores, key=lambda item: (-item[0], item[1]))
     message = EmailMessage()
     message["To"] = recipient
     message["From"] = "me"
     message["Subject"] = subject
-    message.set_content(build_email_body(scores, modified_time, report_path.name))
+    message.set_content(build_email_body(scores, modified_time, report_path.name, parser.partial_scores))
 
-    for attachment_path, content in ((report_path, report_bytes), (param_path, param_bytes)):
+    for attachment_path, content in ((report_path, report_bytes),):
         mime_type, _ = mimetypes.guess_type(attachment_path.name)
         main_type, sub_type = (mime_type or "application/octet-stream").split("/", 1)
         message.add_attachment(
@@ -184,13 +201,13 @@ def send_report(
 def parse_arguments() -> argparse.Namespace:
     base_dir = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(
-        description="Send analysis.html and analysis_param.html as attachments through the Gmail API."
+        description="Send the v2 HTML report as a single attachment through the Gmail API."
     )
     parser.add_argument(
         "--report",
         type=Path,
         default=base_dir / DEFAULT_REPORT,
-        help="Path to the main HTML report; analysis_param.html in the same directory is also required and attached.",
+        help="Path to the HTML report to attach (default: analysis_momentum.html).",
     )
     parser.add_argument(
         "--recipient",
@@ -199,7 +216,7 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         "--subject",
-        default=f"Stock analysis report - {datetime.now():%Y-%m-%d}",
+        default=f"Stock analysis report - 評分v2 - {datetime.now(ZoneInfo("Asia/Taipei")):%Y-%m-%d}",
         help="Email subject.",
     )
     parser.add_argument(
@@ -256,3 +273,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

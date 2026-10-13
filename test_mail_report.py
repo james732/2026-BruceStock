@@ -7,41 +7,60 @@ from unittest.mock import patch
 
 import mail_report
 
+COMPLETE_ROW = '<tr class="stock-row"><td class="score-cell" data-sort-value="115">115</td><td><span class="stock-code">2330</span><span class="stock-name">台積電</span></td></tr>'
+
 
 class MailReportTests(unittest.TestCase):
-    def test_both_attachments_survive_email_serialization(self):
+    def test_only_v2_attachment_survives_email_serialization(self):
         with tempfile.TemporaryDirectory() as directory:
-            report = Path(directory) / "custom.html"
-            report_bytes = (
-                '<tr class="stock-row"><td class="score-cell" data-sort-value="85">85</td>'
-                '<td><span class="stock-code">2330</span>'
-                '<span class="stock-name">台積電</span></td></tr>'
-            ).encode("utf-8")
-            param_bytes = '<html lang="zh-Hant">評分參數<script>const score = 100;</script></html>'.encode("utf-8")
+            report = Path(directory) / 'analysis_momentum.html'
+            report_bytes = COMPLETE_ROW.encode('utf-8')
             report.write_bytes(report_bytes)
-            report.with_name("analysis_param.html").write_bytes(param_bytes)
-            message = mail_report.build_message(report, "test@example.com", "Report")
+            report.with_name('analysis_param.html').write_text('DO NOT ATTACH', encoding='utf-8')
+            message = mail_report.build_message(report, 'james732@gmail.com', 'Report')
             decoded = BytesParser(policy=policy.default).parsebytes(message.as_bytes())
             attachments = list(decoded.iter_attachments())
-            self.assertEqual([part.get_filename() for part in attachments], ["custom.html", "analysis_param.html"])
-            self.assertEqual([part.get_payload(decode=True) for part in attachments], [report_bytes, param_bytes])
-            self.assertTrue(all(part.get_content_type() == "text/html" for part in attachments))
-            body = decoded.get_body(preferencelist=("plain",)).get_content()
-            self.assertIn("2330 台積電：85 分", body)
-            self.assertIn("custom.html", body)
-            self.assertIn("analysis_param.html", body)
+            self.assertEqual([part.get_filename() for part in attachments], ['analysis_momentum.html'])
+            self.assertEqual([part.get_payload(decode=True) for part in attachments], [report_bytes])
+            self.assertEqual(attachments[0].get_content_type(), 'text/html')
+            self.assertEqual(decoded['To'], 'james732@gmail.com')
+            body = decoded.get_body(preferencelist=('plain',)).get_content()
+            self.assertIn('2330 台積電：115 分', body)
+            self.assertIn('analysis_momentum.html', body)
+            self.assertNotIn('analysis_param.html', body)
 
     def test_missing_attachment_does_not_authorize_or_send(self):
         with tempfile.TemporaryDirectory() as directory:
-            report = Path(directory) / "analysis.html"
-            report.write_text("<html></html>", encoding="utf-8")
-            with patch.object(mail_report, "load_credentials") as credentials, \
-                 patch.object(mail_report, "build") as gmail:
+            report = Path(directory) / 'analysis_momentum.html'
+            with patch.object(mail_report, 'load_credentials') as credentials, patch.object(mail_report, 'build') as gmail:
                 with self.assertRaises(FileNotFoundError):
-                    mail_report.send_report(report, "test@example.com", "Report", Path("unused"), Path("unused"))
+                    mail_report.send_report(report, 'test@example.com', 'Report', Path('unused'), Path('unused'))
                 credentials.assert_not_called()
                 gmail.assert_not_called()
 
+    def test_v2_does_not_require_param_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / 'analysis_momentum.html'
+            report.write_text(COMPLETE_ROW, encoding='utf-8')
+            message = mail_report.build_message(report, 'james732@gmail.com', 'Report')
+            self.assertEqual(len(list(message.iter_attachments())), 1)
 
-if __name__ == "__main__":
+    def test_all_incomplete_scores_are_labeled_and_can_send(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / 'analysis_momentum.html'
+            report.write_text(COMPLETE_ROW.replace('115', '-15').replace('>-15</td>', '>-15（法人資料未齊）</td>'), encoding='utf-8')
+            message = mail_report.build_message(report, 'james732@gmail.com', 'Report')
+            body = message.get_body(preferencelist=('plain',)).get_content()
+            self.assertIn('目前沒有可完整評分', body)
+            self.assertIn('2330 台積電：已知小計 -15 分', body)
+            self.assertNotIn('1. 2330', body)
+
+    def test_no_price_row_uses_stock_label_for_incomplete_score(self):
+        parser = mail_report.ReportScoreParser()
+        parser.feed('<tr class="stock-row"><td class="score-cell" data-sort-value="0">0（行情資料未齊）</td><td class="stock-cell" data-sort-value="0050 元大台灣50"><span>▶</span>0050 元大台灣50</td></tr>')
+        self.assertEqual(parser.partial_scores, [(0, '0050', '元大台灣50')])
+        self.assertEqual(parser.scores, [])
+
+
+if __name__ == '__main__':
     unittest.main()

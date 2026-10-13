@@ -3,6 +3,7 @@ on:
   push:
     branches: [main]
     paths:
+      - mail_report.py
       - main.py
       - finmind_cache.py
       - score_history.py
@@ -18,6 +19,16 @@ on:
         description: "Query cutoff (YYYY-MM-DD); blank uses today's Taipei date"
         required: false
         type: string
+      send_email:
+        description: "Send v2 HTML via Gmail after report generation"
+        required: false
+        type: boolean
+        default: false
+      recipient:
+        description: "Gmail recipient (used only when send_email is selected)"
+        required: false
+        type: string
+        default: "james732@gmail.com"
   schedule:
     - cron: "0 12 * * *" # Daily 20:00 Asia/Taipei (UTC+8)
 permissions:
@@ -78,7 +89,7 @@ jobs:
           key: market-data-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             market-data-${{ runner.os }}-
-      - name: Generate reports (no email)
+      - name: Generate reports
         env:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
           END_DATE: ${{ inputs.end_date }}
@@ -120,7 +131,7 @@ jobs:
           PAGES_ENABLED: ${{ vars.PAGES_ENABLED }}
         run: |
           echo "### Stock report generated" >> "$GITHUB_STEP_SUMMARY"
-          echo "Download the legacy, adjustable and momentum HTML reports from this run's artifact. No email was sent." >> "$GITHUB_STEP_SUMMARY"
+          echo "Download the legacy, adjustable and v2 HTML reports from this run's artifact. Optional email delivery is handled by the email job." >> "$GITHUB_STEP_SUMMARY"
           if [[ "$PAGES_ENABLED" != "true" ]]; then
             echo "To publish: enable Settings > Pages > GitHub Actions, then set repository variable PAGES_ENABLED=true." >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -139,3 +150,59 @@ jobs:
       - name: Deploy generated HTML
         id: deployment
         uses: actions/deploy-pages@v4
+
+  email:
+    # The exact commit message below authorizes this one requested test send.
+    # Normal pushes and schedules do not send email. Re-runs do not resend.
+    if: >-
+      github.run_attempt == 1 &&
+      ((github.event_name == 'workflow_dispatch' && inputs.send_email) ||
+       (github.event_name == 'push' && github.event.head_commit.message == '[gmail-test-20261013] Send v2 report to james732@gmail.com'))
+    needs: generate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen
+      - uses: actions/download-artifact@v4
+        with:
+          name: stock-report-${{ github.run_id }}
+          path: public/
+      - name: Send v2 HTML via Gmail
+        env:
+          GMAIL_CLIENT_SECRET_JSON: ${{ secrets.GMAIL_CLIENT_SECRET_JSON }}
+          GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
+          RECIPIENT: ${{ inputs.recipient || 'james732@gmail.com' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth_dir=$(mktemp -d "$RUNNER_TEMP/gmail-auth.XXXXXX")
+          export GMAIL_AUTH_DIR="$auth_dir"
+          trap 'rm -rf "$auth_dir"' EXIT
+          uv run --frozen python - <<'PYAUTH'
+          import json
+          import os
+          from pathlib import Path
+          auth_dir = Path(os.environ["GMAIL_AUTH_DIR"])
+          for name, filename in (("GMAIL_CLIENT_SECRET_JSON", "client_secret.json"), ("GMAIL_TOKEN_JSON", "gmail_token.json")):
+              try:
+                  data = json.loads(os.environ.get(name, ""))
+              except (ValueError, TypeError):
+                  raise SystemExit(f"{name} is missing or is not valid JSON.") from None
+              if not isinstance(data, dict):
+                  raise SystemExit(f"{name} must contain a JSON object.")
+              if name == "GMAIL_TOKEN_JSON" and not data.get("refresh_token"):
+                  raise SystemExit("GMAIL_TOKEN_JSON must contain refresh_token.")
+              path = auth_dir / filename
+              path.touch(mode=0o600)
+              path.write_text(json.dumps(data), encoding="utf-8")
+          PYAUTH
+          uv run --frozen mail_report.py \
+            --report public/analysis_momentum.html \
+            --recipient "$RECIPIENT" \
+            --client-secret "$auth_dir/client_secret.json" \
+            --token "$auth_dir/gmail_token.json" \
+            --non-interactive
+          echo "### Gmail delivery succeeded" >> "$GITHUB_STEP_SUMMARY"
+          echo "Attached only analysis_momentum.html. See the send step for recipient and Gmail message ID." >> "$GITHUB_STEP_SUMMARY"

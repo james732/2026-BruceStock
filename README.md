@@ -73,7 +73,11 @@ API token 由環境變數 `FINMIND_TOKEN` 提供；未設定時會停止產生�
 
 ## 平日 20:00 自動寄送
 
-`run_report.bat` 先執行 `uv run main.py`，成功後才執行寄信程式，將 `analysis.html` 與 `analysis_param.html` 一起附在同一封信寄給 `bruce.sy.chen@gmail.com`。任一報告缺少時不寄出。參數版附件請下載後以瀏覽器開啟。`mail_report.py --report` 若指定其他主報告路徑，會一併附上同目錄的 `analysis_param.html`。執行紀錄累加至 `logs\report.log`；成功回傳 0，失敗回傳 1。批次檔會自動切換至專案目錄，並優先使用此電腦已安裝的 uv 路徑。
+`mail_report.py` 預設只附上 `analysis_momentum.html`，測試收件人為 `james732@gmail.com`；
+不再要求或附上 `analysis_param.html`。內文列出評分v2總分，缺資料另列已知小計。
+指定 `--report` 時只附該檔案，指定 `--recipient` 可覆寫收件人。
+`run_report.bat` 是既有本機流程，仍先產生原版報告；使用新版寄信程式前須另行
+執行 `uv run momentum_report.py` 產生 v2，或指定已產生的 v2 路徑。
 
 首次使用或 Gmail 授權失效時，在 PowerShell 執行下列指令完成授權（不會寄信）：
 
@@ -93,11 +97,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install_schedule.ps1
 
 手動執行 `run_report.bat` 會產生報表並實際寄信。排程採非互動授權模式；需要重新授權時會失敗並記錄錯誤，不會等待瀏覽器登入。
 
-## 雲端產生報告與瀏覽網頁（不寄信）
+## 雲端產生報告、瀏覽網頁與手動測試寄信
 
-新增的 `Generate stock report` workflow 只執行分析與網站發布，不執行
-`run_report.bat` 或 `mail_report.py`，也不需要 Gmail 授權。
-平日台北時間 20:00 觸發；GitHub 排程可能延遲，國定假日仍會執行。
+`Generate stock report` workflow 每天台北時間 20:00 執行分析與網站發布。
+GitHub 排程可能延遲，國定假日仍會執行；一般 push 與排程不寄信。
 可在 Actions 手動執行，選填 `end_date`（YYYY-MM-DD），留空使用台北當日日期。
 
 ### 首次設定
@@ -139,3 +142,13 @@ uv run main.py
 雲端新增 `analysis_momentum.html`，保留原報告並提供頁首切換。執行不寄信。
 本機另執行 `uv run momentum_report.py`；參數設定在 `momentum_config.json`。
 規則、資料映射、缺資料及重複扣分說明見 [MOMENTUM.md](MOMENTUM.md)。
+
+
+### GitHub Actions 手動寄送評分v2
+
+已建立 `GMAIL_CLIENT_SECRET_JSON` 與 `GMAIL_TOKEN_JSON` 後，在 Run workflow 勾選
+`send_email` 並填 `recipient`（預設 `james732@gmail.com`）。報告成功產生後才寄送，
+僅附 `analysis_momentum.html`。Gmail 授權檔只建立在 runner 暫存目錄，寄送後刪除，
+不放進網站或 artifact。重新執行同一次 run 不會重寄；如需再寄，請啟動新的手動 run。
+本次以唯一 commit message 觸發一次測試信；日常 push 不會符合該條件。
+目前尚未啟用每天自動寄信。
