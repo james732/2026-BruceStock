@@ -13,6 +13,7 @@ import sys
 
 import requests
 from main import FinMindClient, TdccClient, TAIPEI_TIMEZONE, API_TOKEN, load_stock_ids, analyze_news_rows, safe_news_link, analyze_price_rows, render_report, ScoreDay
+from main import analyze_institutional_rows, analyze_weekly_holdings
 from score_history import render_history
 from finmind_cache import CachedFinMindClient
 from momentum_scoring import Config, RULES, build_features, evaluate, number, normalize_shares
@@ -183,9 +184,11 @@ def render(results, names, as_of, generated_at, config, warnings, news=None):
             provenance = r.get('provenance', {})
             row_id = 'stock-' + r['symbol']
             analysis = r.get('price_analysis')
+            market_details = '<h3>最近五個交易日法人買賣</h3><p>此期間沒有取得法人資料。</p><h3>最近四週股價與持股分級</h3><p>此期間沒有取得持股分級資料。</p>'
             if analysis is not None:
                 history = {r['symbol']: [ScoreDay(r['symbol'], analysis.trading_date, {}, r['score'] if r['score'] is not None else 0)]}
-                original_row = render_report([analysis], [], [], [], names, as_of, score_histories=history)
+                original_row = render_report([analysis], r.get('institutional_days', []), r.get('weekly_holdings', []), [], names, as_of, score_histories=history)
+                market_details = re.search(r'(<h3>[^<]*最近五個交易日法人買賣</h3>.*?)<h3 class="news-heading">', original_row, re.S).group(1)
                 summary = re.search(r'<tr class="stock-row".*?</tr>', original_row, re.S).group(0)
                 summary = summary.replace('institution-' + esc(r['symbol']), esc(row_id))
                 if r['status'] != 'complete':
@@ -206,6 +209,7 @@ def render(results, names, as_of, generated_at, config, warnings, news=None):
 <tr id="{esc(row_id)}" class="institution-details stock-detail" hidden><td colspan="11"><section class="institution-panel">
 {rule_details}
 {history_html}
+{market_details}
 <h3>近三日個股新聞（{news_start.isoformat()} 至 {news_end.isoformat()}）</h3>{news_html}</section></td></tr>''')
     cards.append('</tbody></table></div>')
     config_json = esc(json.dumps(asdict(config), ensure_ascii=False, indent=2))
@@ -285,6 +289,16 @@ def generate(stock_ids, end_date, remote, cache, tdcc, config, now):
             result['price_analysis'] = analyze_price_rows(symbol, prices)
         except (ValueError, KeyError, TypeError):
             result['price_analysis'] = None
+        try:
+            result['institutional_days'] = analyze_institutional_rows(symbol, institutions, trading_days=5)
+        except (ValueError, KeyError, TypeError):
+            result['institutional_days'] = []
+            warnings.append(symbol + ' 法人明細無法產生；保留其他資料。')
+        try:
+            result['weekly_holdings'] = analyze_weekly_holdings([symbol], snapshots, {symbol: prices})
+        except (ValueError, KeyError, TypeError, ZeroDivisionError):
+            result['weekly_holdings'] = []
+            warnings.append(symbol + ' 最近四週持股明細資料不足；保留其他資料。')
         result['history_rule_results'] = []
         result['score_history'] = analyze_momentum_history(symbol, daily, weeks, dates, as_of, config, result, result['history_rule_results'])
         results.append(result)
