@@ -30,7 +30,7 @@ on:
         type: string
         default: "bruce.sy.chen@gmail.com"
   schedule:
-    - cron: "0 12 * * *" # Daily 20:00 Asia/Taipei (UTC+8)
+    - cron: "18 12 * * *" # Daily 20:18 Asia/Taipei (UTC+8)
 permissions:
   contents: read
 concurrency:
