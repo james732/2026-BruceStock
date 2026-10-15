@@ -158,7 +158,8 @@ jobs:
       github.run_attempt == 1 &&
       needs.deploy.result == 'success' &&
       (github.event_name == 'schedule' ||
-       (github.event_name == 'workflow_dispatch' && inputs.send_email))
+       (github.event_name == 'workflow_dispatch' && inputs.send_email) ||
+       (github.event_name == 'push' && github.event.head_commit.message == '[manual-send-20261015-2056] Update v2 report and email Bruce'))
     needs: [generate, deploy]
     runs-on: ubuntu-latest
     timeout-minutes: 10
