@@ -2,7 +2,7 @@
   "reports": {
     "2026-10-18": {
       "deliveries": {},
-      "deployed": false,
+      "deployed": true,
       "files": {
         "analysis.html": "495b97507be62a8da4f6280e31495dc21c3c80405d39246ebf6e333125616420",
         "analysis_momentum.html": "aab0feef6e8140ed8b8f2e1ed94152353e7e4bf6764074576222454ad53ea760",
