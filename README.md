@@ -96,35 +96,76 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install_schedule.ps1
 
 手動執行 `run_report.bat` 會產生報表並實際寄信。排程採非互動授權模式；需要重新授權時會失敗並記錄錯誤，不會等待瀏覽器登入。
 
-## 雲端產生報告、瀏覽網頁與手動測試寄信
+## 雲端每日報告與自動補救
 
-`Generate stock report` workflow 每天台北時間 20:00 執行分析與網站發布。
-GitHub 排程可能延遲，國定假日仍會執行；一般 push 與排程不寄信。
-可在 Actions 手動執行，選填 `end_date`（YYYY-MM-DD），留空使用台北當日日期。
+`Generate stock report` 以每日台北時間 **20:18** 為目標，包含週末及假日。
+原生 GitHub Actions 排程可能延遲或遺漏，無法保證 20:18 準時啟動或完成。
+20:18 啟動後仍需產生、部署及寄送時間。備援喚醒在 20:38、20:58，
+21～23 時每小時 18／38／58 分，其他時段每小時 18 分。
+每次檢查最近已到期日報，已寄送便跳過，不會每次重新生成或寄信。
+程式與離線測試由 `Offline tests` workflow 在 main push 與 PR 執行；push 不再更新正式網站。
 
-### 首次設定
+### 設定與首次啟用
 
-1. Settings → Secrets and variables → Actions → Secrets，新增 `FINMIND_TOKEN`。
-   使用你目前的 FinMind API token；不要將值貼進程式、commit 或執行紀錄。
+1. Actions secrets：`FINMIND_TOKEN`、`GMAIL_CLIENT_SECRET_JSON`、`GMAIL_TOKEN_JSON`。
+   Gmail token 必須含 refresh token，維持 `gmail.send` 權限即可，不需要讀取郵件。
 2. Settings → Pages → Build and deployment → Source 選 `GitHub Actions`。
-   此專案是私有儲存庫，直接啟用 Pages 需帳號方案支援；一般 Pages 網站公開可瀏覽。
-   若 Pages 不可用，報告仍可從 Actions artifact 下載；保留程式庫私有。
-3. Secrets and variables → Actions → Variables，新增 `PAGES_ENABLED`，值為 `true`。
-   未設定時只產生與保存 HTML，略過網站部署。
-4. Actions → Generate stock report → Run workflow（選 main）。
-   成功後 deploy job 顯示实际網站網址；artifact 保存 30 天。
+3. Actions repository variable `PAGES_ENABLED=true`。正式發布未啟用 Pages 時會失敗，
+   不會跳過部署而繼續寄信。
+4. 合併新 workflow 至 main 後，等下一次排程自動處理。程式起始管理日為 2026-10-18；
+   不會自動補寄此日前的報告。`report-state` 分支由第一份正式報告自動建立。
+   若分支規則禁止 GITHUB_TOKEN 建立／更新該分支，需允許此 workflow 寫入；
+   寫入失敗時會停止，不會繞過寄信紀錄。
 
-首頁為生成報告的副本 `index.html`，另保留 `analysis.html` 與
-`analysis_param.html`。可由網站網址後加 `analysis_param.html` 開啟參數版。
-部署目錄僅含本次生成的 HTML，不含原始碼、token、SQLite 或 Gmail 憑證。
-網站目前展示最新一次成功發布的報告，不提供長期歷史頁面。
-產生失敗不部署，線上保持上一份成功報告；請查看報告產生時間。
-調整 `target.txt` 後，新一次執行即使用新的股票名單。
+### 報告日期、版本與保存
 
-SQLite 與 TDCC 快取透過 Actions cache 還原與保存。
-每次使用新的 cache key 並還原前次版本，避免固定 key 不能更新的問題。
-cache 可能被清除，因此仍需可從來源重建，不能當成長期備份。
-Actions 執行時間、artifact 與 cache 用量受 GitHub 帳號額度限制。
+- `report_date`：每日批次日期，以台北 20:18 為切換點。例如 10/19 00:39 補跑仍為 10/18。
+- `market_as_of`：最近已收盤交易日，可能與批次日期不同。
+- `generated_at`、`data_observed_at`：實際產生與取得資料時間。
+  延遲補跑使用當時取得的資料，不宣稱重現原定 20:18 的歷史資訊。
+- 每日正式版目前固定 r1，首次產生即凍結 HTML 與 SHA-256，後續部署／寄信重試沿用同一份內容。
+  不會因多次喚醒而重新計分。修改股票清單或程式，於下一份尚未產生的日報生效。
+- `report_metadata.json` 同時放進網站與 artifact；信件日期和時間讀取 metadata，
+  不依寄送當下日期或下載附件的檔案時間推測。
+
+自動補救窗口到下一日 20:18；窗口結束後只處理新一期，不累積補寄多天舊報告。
+GitHub run 建立時間作為穩定批次基準，舊 run 跨過窗口後重跑會跳過；應使用新的手動 run。
+原始排程事件沒有可靠的預定觸發日期，因此此機制按「最近已到期工作」運作。
+
+`report-state` 分支保存 `delivery.json` 與 `reports/YYYY-MM-DD/r1/` 的凍結報告。
+每次變更以 Git commit 和非強制 ref 更新作為持久 checkpoint，保留原狀態並檢查衝突。
+分支已存在但內容損壞、權限錯誤或讀取失敗都會停止，不能當成尚未寄送。
+請勿刪除或人工覆寫此分支；刪除寄送紀錄會失去去重依據。
+這些分數、報告、雜湊、run ID 和 Gmail message ID 依 repository 可見性保存，
+不存 Gmail 憑證；收件者以雜湊作為 ledger key。凍結報告長期保存在該分支，需留意儲存空間增長。
+
+### 寄信與重試限制
+
+每日排程寄到 `bruce.sy.chen@gmail.com`，只附 `analysis_momentum.html`。
+先凍結報告、部署 Pages 並保存部署成功，再寄信。
+同一批次／r1／收件者 **最多兩次自動 Gmail 呼叫**，成功保存 message ID 後立即停止。
+每次呼叫前先保存嘗試次數；API timeout、程序中斷、寄出後寫回失敗，均算一次。
+結果不明時後續喚醒允許再試一次，因此最多可能收到兩封同版本信。
+到達兩次上限後顯示略過原因，不再自動重試；這不代表郵件一定成功。
+可從失敗 run 與 `delivery.json` 的 `sending`／`attempts` 判斷是否需人工處理。
+一般重跑也會遵守同一份 ledger，不再用 `run_attempt == 1` 阻止失敗補救。
+Gmail 寄送與 GitHub commit 無法形成同一交易，不能絕對保證一定送達或完全沒有重複。
+
+### 手動操作與預覽
+
+Actions → Generate stock report → Run workflow（main）：
+
+- **未勾選 `send_email`**：只產生預覽 artifact，不部署、不寄信、不更動正式 ledger。
+  `end_date` 留空使用 run 建立時的台北日期，也可指定過往日期做歷史查詢。
+- **勾選 `send_email`**：正式發布最近已到 20:18 的日報，收件者預設 Bruce。
+  `end_date` 應留空，或與最近到期日期一致；不能用此入口發布過往日期覆蓋網站。
+  已寄過相同收件者便跳過；需要另寄一位收件者可填 `recipient`。
+- 手動寄送同樣最多兩次嘗試，不提供繞過上限或強制改寫 r1 的選項。
+
+artifact 保留 30 天。正式網站僅展示最近成功發布內容，保留 `index.html`、
+`analysis.html`、`analysis_param.html`、`analysis_momentum.html` 與 metadata。
+產生失敗不部署；既有正式報告保持不變。憑證、原始碼、SQLite 不會放進網站或 artifact。
+SQLite／TDCC 快取仍由 Actions cache 還原與保存；cache 可清除，不承擔寄送去重責任。
 
 本機執行也改為從環境變數讀取 token，例如 PowerShell：
 
@@ -138,16 +179,16 @@ uv run main.py
 
 ## 評分v2新頁面
 
-雲端新增 `analysis_momentum.html`，保留原報告並提供頁首切換。執行不寄信。
+雲端提供 `analysis_momentum.html`，保留原報告並提供頁首切換；正式排程會寄送 v2 附件。
 本機另執行 `uv run momentum_report.py`；參數設定在 `momentum_config.json`。
 規則、資料映射、缺資料及重複扣分說明見 [MOMENTUM.md](MOMENTUM.md)。
 
 
-### GitHub Actions 手動寄送評分v2
+### 本機日期模式
 
-已建立 `GMAIL_CLIENT_SECRET_JSON` 與 `GMAIL_TOKEN_JSON` 後，在 Run workflow 勾選
-`send_email` 並填 `recipient`（預設 `james732@gmail.com`）。報告成功產生後才寄送，
-僅附 `analysis_momentum.html`。Gmail 授權檔只建立在 runner 暫存目錄，寄送後刪除，
-不放進網站或 artifact。重新執行同一次 run 不會重寄；如需再寄，請啟動新的手動 run。
-本次以唯一 commit message 觸發一次測試信；日常 push 不會符合該條件。
-目前尚未啟用每天自動寄信。
+`momentum_report.py --mode auto` 保留既有行為：過往日期走歷史查詢，
+不把現在取得的集保週資料當成歷史當時已知。正式延遲日報明確使用 `--mode daily`，
+並揭露實際取得時間；`--mode historical` 可明確要求歷史限制。
+`--metadata-output PATH` 可輸出資料日及產生時間供凍結流程使用。
+`mail_report.py --metadata public/report_metadata.json` 可驗證附件雜湊並使用固定批次資訊；
+獨立執行 mail_report.py 不經 ledger，因此不受雲端兩次上限保護。
