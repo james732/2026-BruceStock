@@ -2,6 +2,7 @@ import argparse
 import base64
 import json
 import mimetypes
+import hashlib
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from email.message import EmailMessage
@@ -146,9 +147,14 @@ def load_credentials(client_secret: Path, token_path: Path, non_interactive: boo
     return credentials
 
 
-def build_message(report_path: Path, recipient: str, subject: str) -> EmailMessage:
+def build_message(report_path: Path, recipient: str, subject: str, metadata: dict | None = None) -> EmailMessage:
     modified_time = datetime.fromtimestamp(report_path.stat().st_mtime, ZoneInfo("Asia/Taipei"))
     report_bytes = report_path.read_bytes()
+    if metadata is not None:
+        expected = metadata['html_sha256'][report_path.name]
+        if hashlib.sha256(report_bytes).hexdigest() != expected:
+            raise ValueError('Report does not match frozen metadata')
+        modified_time = datetime.fromisoformat(metadata['generated_at'])
     parser = ReportScoreParser()
     parser.feed(report_bytes.decode("utf-8-sig"))
     if not parser.scores and not parser.partial_scores:
@@ -158,7 +164,15 @@ def build_message(report_path: Path, recipient: str, subject: str) -> EmailMessa
     message["To"] = recipient
     message["From"] = "me"
     message["Subject"] = subject
-    message.set_content(build_email_body(scores, modified_time, report_path.name, parser.partial_scores))
+    body = build_email_body(scores, modified_time, report_path.name, parser.partial_scores)
+    if metadata is not None:
+        body += (f"\n報告日期：{metadata['report_date']} · r{metadata['revision']}"
+                 f"\n行情資料日：{metadata['market_as_of']}"
+                 f"\n原定發布：{metadata['scheduled_for']}"
+                 f"\n資料取得時間：{metadata['data_observed_at']}"
+                 f"\n報告識別：{metadata['content_sha256']}"
+                 "\n延遲補跑使用實際執行時取得的資料；同一正式版本重試沿用相同附件。\n")
+    message.set_content(body)
 
     for attachment_path, content in ((report_path, report_bytes),):
         mime_type, _ = mimetypes.guess_type(attachment_path.name)
@@ -179,8 +193,9 @@ def send_report(
     client_secret: Path,
     token_path: Path,
     non_interactive: bool = False,
+    metadata: dict | None = None,
 ) -> str:
-    message = build_message(report_path, recipient, subject)
+    message = build_message(report_path, recipient, subject, metadata)
     credentials = load_credentials(client_secret, token_path, non_interactive)
     raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
 
@@ -216,7 +231,7 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         "--subject",
-        default=f"Stock analysis report - 評分v2 - {datetime.now(ZoneInfo("Asia/Taipei")):%Y-%m-%d}",
+        default=None,
         help="Email subject.",
     )
     parser.add_argument(
@@ -232,6 +247,7 @@ def parse_arguments() -> argparse.Namespace:
         help="Path used to store the OAuth access and refresh token.",
     )
     parser.add_argument("--non-interactive", action="store_true", help="Fail instead of opening an OAuth login browser.")
+    parser.add_argument('--metadata', type=Path, help='Frozen report_metadata.json; validates attachment and supplies report date/time.')
     parser.add_argument("--authorize-only", action="store_true", help="Authorize Gmail without sending a message.")
     return parser.parse_args()
 
@@ -256,13 +272,17 @@ def main() -> int:
         raise FileNotFoundError(f"Report file does not exist: {report_path}")
 
     try:
+        metadata = json.loads(args.metadata.read_text(encoding='utf-8')) if args.metadata else None
+        report_date = metadata['report_date'] if metadata else datetime.now(ZoneInfo('Asia/Taipei')).date().isoformat()
+        revision = f" - r{metadata['revision']}" if metadata else ''
         message_id = send_report(
             report_path=report_path,
             recipient=args.recipient,
-            subject=args.subject,
+            subject=args.subject or f'Stock analysis report - 評分v2 - {report_date}{revision}',
             client_secret=client_secret,
             token_path=token_path,
             non_interactive=args.non_interactive,
+            metadata=metadata,
         )
     except HttpError as error:
         raise RuntimeError(f"Gmail API request failed: {error}") from error
@@ -273,4 +293,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 

@@ -226,7 +226,7 @@ def render(results, names, as_of, generated_at, config, warnings, news=None):
 </body></html>'''
 
 
-def generate(stock_ids, end_date, remote, cache, tdcc, config, now):
+def generate(stock_ids, end_date, remote, cache, tdcc, config, now, mode='auto', metadata=None):
     warnings = []
     # The API documents TaiwanStockTradingDate as a dataset-only query.
     calendar_rows = remote._fetch_rows({'dataset': 'TaiwanStockTradingDate'})
@@ -235,7 +235,9 @@ def generate(stock_ids, end_date, remote, cache, tdcc, config, now):
     if not dates:
         raise ValueError('No closed trading date available from market calendar')
     as_of = dates[-1]
-    historical = end_date < now.date()
+    if mode not in ('auto', 'daily', 'historical'):
+        raise ValueError('Unknown report mode')
+    historical = mode == 'historical' or (mode == 'auto' and end_date < now.date())
     cutoff = datetime.combine(end_date, time.max, TAIPEI_TIMEZONE) if historical else now
     try:
         snapshots = tdcc.fetch_recent_snapshots(stock_ids, as_of, count=max(5, config.consecutive_changes + 1))
@@ -243,6 +245,13 @@ def generate(stock_ids, end_date, remote, cache, tdcc, config, now):
         snapshots = {}
         warnings.append('集保資料取得失敗；相關規則標記缺資料：' + type(e).__name__)
     observed = datetime.now(TAIPEI_TIMEZONE)
+    if metadata is not None:
+        metadata.update(report_date=end_date.isoformat(), market_as_of=as_of.isoformat(),
+                        generated_at=now.isoformat(timespec='seconds'),
+                        data_observed_at=observed.isoformat(timespec='seconds'),
+                        mode='historical' if historical else 'daily')
+    if not historical and end_date < now.date():
+        warnings.append('每日批次延遲執行：資料於本次執行時取得，並非原定發布時間的歷史快照。')
     if historical:
         warnings.append('歷史查詢無可驗證的集保發布時間；本次取得的週資料不視為歷史當時已知，相關規則不計分。')
     max_window = max(*config.short_ma, *config.long_ma, *config.weak_ma, *config.breakdown_ma,
@@ -317,6 +326,8 @@ def main():
     parser.add_argument('--end-date', type=date.fromisoformat, default=datetime.now(TAIPEI_TIMEZONE).date())
     parser.add_argument('--output', type=Path, default=Path('analysis_momentum.html'))
     parser.add_argument('--config', type=Path, default=Path('momentum_config.json'))
+    parser.add_argument('--mode', choices=('auto', 'daily', 'historical'), default='auto')
+    parser.add_argument('--metadata-output', type=Path)
     args = parser.parse_args()
     cache = None
     try:
@@ -327,10 +338,15 @@ def main():
         config = Config(**json.loads(args.config.read_text(encoding='utf-8'))).validate()
         remote = FinMindClient(API_TOKEN)
         cache = CachedFinMindClient(remote, Path(__file__).resolve().parent / 'data' / 'finmind.sqlite3')
+        metadata = {}
         content = generate(load_stock_ids(args.target), args.end_date, remote, cache,
-                           TdccClient(Path('tdcc_cache')), config, datetime.now(TAIPEI_TIMEZONE))
+                           TdccClient(Path('tdcc_cache')), config, datetime.now(TAIPEI_TIMEZONE),
+                           mode=args.mode, metadata=metadata)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(content, encoding='utf-8')
+        if args.metadata_output:
+            args.metadata_output.parent.mkdir(parents=True, exist_ok=True)
+            args.metadata_output.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding='utf-8')
         print('Momentum report written to', args.output)
         return 0
     except REMOTE_ERRORS + (TypeError, KeyError) as e:
@@ -343,3 +359,4 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+

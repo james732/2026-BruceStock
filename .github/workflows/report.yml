@@ -1,86 +1,63 @@
 name: Generate stock report
 on:
-  push:
-    branches: [main]
-    paths:
-      - mail_report.py
-      - main.py
-      - finmind_cache.py
-      - score_history.py
-      - momentum_*.py
-      - momentum_config.json
-      - target.txt
-      - pyproject.toml
-      - uv.lock
-      - .github/workflows/report.yml
   workflow_dispatch:
     inputs:
       end_date:
-        description: "Query cutoff (YYYY-MM-DD); blank uses today's Taipei date"
+        description: "Preview cutoff (YYYY-MM-DD); official sends must use the latest due date"
         required: false
         type: string
       send_email:
-        description: "Send v2 HTML via Gmail after successful website deployment"
+        description: "Publish and send latest due daily report (at most two automatic send attempts)"
         required: false
         type: boolean
         default: false
       recipient:
-        description: "Gmail recipient (used only when send_email is selected)"
+        description: "Recipient for an explicitly requested manual publication"
         required: false
         type: string
         default: "bruce.sy.chen@gmail.com"
   schedule:
-    - cron: "18 12 * * *" # Daily 20:18 Asia/Taipei (UTC+8)
+    - cron: "18,38,58 12-15 * * *" # Taipei 20:18 through 23:58
+    - cron: "18 16-23 * * *"       # Taipei 00:18 through 07:18
+    - cron: "18 0-11 * * *"       # Taipei 08:18 through 19:18
 permissions:
   contents: read
 concurrency:
   group: stock-report
   cancel-in-progress: false
 jobs:
-  generate:
+  publish:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: write
+      actions: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      END_DATE: ${{ inputs.end_date }}
+      SEND_EMAIL: ${{ inputs.send_email }}
+      RECIPIENT: ${{ github.event_name == 'schedule' && 'bruce.sy.chen@gmail.com' || inputs.recipient || 'bruce.sy.chen@gmail.com' }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
       - run: uv sync --frozen
-      - name: Run offline tests
-        run: uv run --frozen python -m unittest -v
-      - name: Verify FinMind authorization without cache
+      - name: Plan publication and restore frozen report
+        id: plan
+        run: uv run --frozen report_delivery.py prepare
+      - name: Require Pages for official publication
+        if: steps.plan.outputs.run == 'true' && steps.plan.outputs.official == 'true'
         env:
-          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
-        run: |
-          uv run --frozen python - <<'PY'
-          import os
-          import sys
-          import requests
-          token = os.environ.get("FINMIND_TOKEN", "")
-          if not token or token != token.strip() or any(ch.isspace() for ch in token) or token.lower().startswith("bearer"):
-              print("FinMind token format invalid: paste the token only, without Bearer, quotes or whitespace.")
-              sys.exit(1)
-          response = requests.get(
-              "https://api.finmindtrade.com/api/v4/data",
-              headers={"Authorization": "Bearer " + token},
-              params={"dataset": "TaiwanStockInfo"},
-              timeout=30,
-          )
-          try:
-              payload = response.json()
-          except ValueError:
-              payload = {}
-          if response.status_code != 200 or payload.get("status") != 200 or not isinstance(payload.get("data"), list):
-              message = str(payload.get("msg", "No API error message"))
-              message = message.replace(token, "[REDACTED]")
-              print(f"FinMind authorization check failed: HTTP {response.status_code}; API status={payload.get('status')}; {message[:300]}")
-              sys.exit(1)
-          print("FinMind authorization check passed: fresh TaiwanStockInfo request succeeded.")
-          PY
+          PAGES_ENABLED: ${{ vars.PAGES_ENABLED }}
+        run: test "$PAGES_ENABLED" = true
       - name: Restore market data cache
+        if: steps.plan.outputs.generate == 'true'
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -89,24 +66,30 @@ jobs:
           key: market-data-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             market-data-${{ runner.os }}-
-      - name: Generate reports
+      - name: Generate reports with one batch date
+        if: steps.plan.outputs.generate == 'true'
         env:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
-          END_DATE: ${{ inputs.end_date }}
+          REPORT_DATE: ${{ steps.plan.outputs.report_date }}
+          REPORT_MODE: ${{ steps.plan.outputs.mode }}
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p public
-          args=()
-          if [[ -n "$END_DATE" ]]; then
-            args+=(--end-date "$END_DATE")
-          fi
-          uv run --frozen main.py --output public/analysis.html "${args[@]}"
-          uv run --frozen momentum_report.py --output public/analysis_momentum.html "${args[@]}"
+          uv run --frozen main.py --end-date "$REPORT_DATE" --output public/analysis.html
+          uv run --frozen momentum_report.py --end-date "$REPORT_DATE" --mode "$REPORT_MODE" --output public/analysis_momentum.html --metadata-output public/generation.json
           cp public/analysis.html public/index.html
           test -s public/index.html
           test -s public/analysis_param.html
           test -s public/analysis_momentum.html
+      - name: Freeze report and checkpoint before deployment
+        if: steps.plan.outputs.generate == 'true'
+        env:
+          REPORT_DATE: ${{ steps.plan.outputs.report_date }}
+          OFFICIAL: ${{ steps.plan.outputs.official }}
+        run: uv run --frozen report_delivery.py freeze
       - name: Save updated market data cache
+        if: steps.plan.outputs.generate == 'true'
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
@@ -114,96 +97,50 @@ jobs:
             data/finmind.sqlite3
             tdcc_cache
           key: market-data-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
-      - name: Save downloadable reports
+      - name: Save downloadable frozen reports
+        if: steps.plan.outputs.run == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: stock-report-${{ github.run_id }}
+          name: stock-report-${{ steps.plan.outputs.report_date }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: public/
           retention-days: 30
           if-no-files-found: error
       - name: Package website
-        if: vars.PAGES_ENABLED == 'true'
+        if: steps.plan.outputs.deploy == 'true'
         uses: actions/upload-pages-artifact@v3
         with:
           path: public/
-      - name: Report next steps
-        env:
-          PAGES_ENABLED: ${{ vars.PAGES_ENABLED }}
-        run: |
-          echo "### Stock report generated" >> "$GITHUB_STEP_SUMMARY"
-          echo "Download the legacy, adjustable and v2 HTML reports from this run's artifact. Optional email delivery is handled by the email job." >> "$GITHUB_STEP_SUMMARY"
-          if [[ "$PAGES_ENABLED" != "true" ]]; then
-            echo "To publish: enable Settings > Pages > GitHub Actions, then set repository variable PAGES_ENABLED=true." >> "$GITHUB_STEP_SUMMARY"
-          fi
-  deploy:
-    if: vars.PAGES_ENABLED == 'true'
-    needs: generate
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy generated HTML
+      - name: Deploy frozen HTML
         id: deployment
+        if: steps.plan.outputs.deploy == 'true'
         uses: actions/deploy-pages@v4
-
-  email:
-    # Daily schedules send after successful deployment. Manual sends remain opt-in.
-    # Normal pushes and re-runs do not send email.
-    if: >-
-      github.run_attempt == 1 &&
-      needs.deploy.result == 'success' &&
-      (github.event_name == 'schedule' ||
-       (github.event_name == 'workflow_dispatch' && inputs.send_email))
-    needs: [generate, deploy]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - run: uv sync --frozen
-      - uses: actions/download-artifact@v4
-        with:
-          name: stock-report-${{ github.run_id }}
-          path: public/
-      - name: Send v2 HTML via Gmail
+      - name: Checkpoint deployment
+        if: steps.plan.outputs.deploy == 'true'
         env:
+          REPORT_DATE: ${{ steps.plan.outputs.report_date }}
+          OFFICIAL: ${{ steps.plan.outputs.official }}
+        run: uv run --frozen report_delivery.py deployed
+      - name: Send frozen v2 report with bounded retries
+        if: steps.plan.outputs.send == 'true'
+        env:
+          REPORT_DATE: ${{ steps.plan.outputs.report_date }}
+          OFFICIAL: ${{ steps.plan.outputs.official }}
           GMAIL_CLIENT_SECRET_JSON: ${{ secrets.GMAIL_CLIENT_SECRET_JSON }}
           GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
-          RECIPIENT: ${{ github.event_name == 'schedule' && 'bruce.sy.chen@gmail.com' || inputs.recipient || 'bruce.sy.chen@gmail.com' }}
+        run: uv run --frozen report_delivery.py send
+      - name: Publication summary
+        if: always()
+        env:
+          REPORT_DATE: ${{ steps.plan.outputs.report_date }}
+          OFFICIAL: ${{ steps.plan.outputs.official }}
+          REASON: ${{ steps.plan.outputs.reason }}
         shell: bash
         run: |
-          set -euo pipefail
-          auth_dir=$(mktemp -d "$RUNNER_TEMP/gmail-auth.XXXXXX")
-          export GMAIL_AUTH_DIR="$auth_dir"
-          trap 'rm -rf "$auth_dir"' EXIT
-          uv run --frozen python - <<'PYAUTH'
-          import json
-          import os
-          from pathlib import Path
-          auth_dir = Path(os.environ["GMAIL_AUTH_DIR"])
-          for name, filename in (("GMAIL_CLIENT_SECRET_JSON", "client_secret.json"), ("GMAIL_TOKEN_JSON", "gmail_token.json")):
-              try:
-                  data = json.loads(os.environ.get(name, ""))
-              except (ValueError, TypeError):
-                  raise SystemExit(f"{name} is missing or is not valid JSON.") from None
-              if not isinstance(data, dict):
-                  raise SystemExit(f"{name} must contain a JSON object.")
-              if name == "GMAIL_TOKEN_JSON" and not data.get("refresh_token"):
-                  raise SystemExit("GMAIL_TOKEN_JSON must contain refresh_token.")
-              path = auth_dir / filename
-              path.touch(mode=0o600)
-              path.write_text(json.dumps(data), encoding="utf-8")
-          PYAUTH
-          uv run --frozen mail_report.py \
-            --report public/analysis_momentum.html \
-            --recipient "$RECIPIENT" \
-            --client-secret "$auth_dir/client_secret.json" \
-            --token "$auth_dir/gmail_token.json" \
-            --non-interactive
-          echo "### Gmail delivery succeeded" >> "$GITHUB_STEP_SUMMARY"
-          echo "Attached only analysis_momentum.html. See the send step for recipient and Gmail message ID." >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### Stock report publication"
+            echo "Batch: $REPORT_DATE; official: $OFFICIAL"
+            echo "$REASON"
+            echo "Official snapshots and delivery attempts are checkpointed on report-state."
+            echo "At most two automatic Gmail calls per report revision and recipient; successful delivery skips later runs."
+            echo "Preview runs generate artifacts only. GitHub schedule timing is best effort."
+          } >> "$GITHUB_STEP_SUMMARY"
