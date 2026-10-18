@@ -5,8 +5,10 @@
         "7cc2f1e0d698f6d27b55614b3515f5b5cd6e7d14ed97140b52f9f6d09dddfa23": {
           "attempted_at": "2026-10-19T03:28:24.840781+08:00",
           "attempts": 1,
+          "message_id": "1a1507ca2851da07",
           "run_id": "39158817056",
-          "status": "sending"
+          "sent_at": "2026-10-19T03:28:28.303622+08:00",
+          "status": "sent"
         }
       },
       "deployed": true,
