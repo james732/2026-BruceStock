@@ -41,7 +41,14 @@
       }
     },
     "2026-10-20": {
-      "deliveries": {},
+      "deliveries": {
+        "7cc2f1e0d698f6d27b55614b3515f5b5cd6e7d14ed97140b52f9f6d09dddfa23": {
+          "attempted_at": "2026-10-20T23:08:30.826015+08:00",
+          "attempts": 1,
+          "run_id": "39445515810",
+          "status": "sending"
+        }
+      },
       "deployed": true,
       "files": {
         "analysis.html": "1a52422155e43507f55c666a20edea6a7093b5d7d2a9c49db5c7e31a5d7d1dda",
