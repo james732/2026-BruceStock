@@ -1,5 +1,6 @@
 import copy
 import json
+import os
 import tempfile
 import unittest
 from datetime import datetime
@@ -127,6 +128,57 @@ class DeliveryTests(unittest.TestCase):
         self.assertIsNone(d.send_delivery(store, '2026-10-18', 'b@example.com', sender))
         self.assertEqual(sender.call_count, 2)
         self.assertFalse(d.plan(store, anchor('2026-10-18T23:00:00+08:00'), 'b@example.com')['run'])
+
+
+    def test_preflight_failure_does_not_consume_email_attempt(self):
+        store = self.make_record()
+        with tempfile.TemporaryDirectory() as folder:
+            public = Path(folder)
+            (public / 'report_metadata.json').write_text(
+                json.dumps({'report_date': '2026-10-18', 'official': True}), encoding='utf-8')
+            with patch.object(d, 'PUBLIC', public), patch.dict(os.environ, {
+                    'GMAIL_CLIENT_SECRET_JSON': '{"installed": {}}',
+                    'GMAIL_TOKEN_JSON': '{"refresh_token": "expired"}',
+            }), patch.object(mail_report, 'load_credentials',
+                             side_effect=RuntimeError('Gmail OAuth refresh token expired')):
+                with self.assertRaisesRegex(RuntimeError, 'expired'):
+                    d.gmail_sender('2026-10-18', 'b@example.com')
+        # Authentication happens before send_delivery, so the durable quota is untouched.
+        receipt = d.delivery(store.data['reports']['2026-10-18'], 'b@example.com')
+        self.assertEqual(receipt['attempts'], 0)
+        self.assertEqual(store.saves, 0)
+
+    def test_preflighted_credentials_are_reused_for_single_gmail_send(self):
+        store = self.make_record()
+        with tempfile.TemporaryDirectory() as folder:
+            public = Path(folder)
+            (public / 'report_metadata.json').write_text(
+                json.dumps({'report_date': '2026-10-18', 'official': True}), encoding='utf-8')
+            credentials = object()
+            with patch.object(d, 'PUBLIC', public), patch.dict(os.environ, {
+                    'GMAIL_CLIENT_SECRET_JSON': '{"installed": {}}',
+                    'GMAIL_TOKEN_JSON': '{"refresh_token": "fresh"}',
+            }), patch.object(mail_report, 'load_credentials',
+                             return_value=credentials) as preflight, patch.object(
+                             mail_report, 'send_report', return_value='gmail-id') as send:
+                sender = d.gmail_sender('2026-10-18', 'b@example.com')
+                preflight.assert_called_once()
+                self.assertEqual(store.saves, 0)
+                result = d.send_delivery(store, '2026-10-18', 'b@example.com', sender)
+                self.assertEqual(result, 'gmail-id')
+                self.assertIs(send.call_args.kwargs['credentials'], credentials)
+                self.assertEqual(store.saves, 2)
+                self.assertEqual(d.delivery(store.data['reports']['2026-10-18'],
+                                            'b@example.com')['status'], 'sent')
+
+    def test_exhausted_quota_explicitly_marks_unconfirmed_delivery(self):
+        store = self.make_record()
+        receipt = d.delivery(store.data['reports']['2026-10-18'], 'b@example.com')
+        receipt.update(attempts=2, status='sending')
+        result = d.plan(store, anchor('2026-10-19T00:39:00+08:00'), 'b@example.com')
+        self.assertFalse(result['run'])
+        self.assertTrue(result['delivery_blocked'])
+        self.assertIn('NOT confirmed', result['reason'])
 
     def test_failure_to_persist_reservation_never_sends(self):
         store = self.make_record()

@@ -3,7 +3,8 @@ import unittest
 from email import policy
 from email.parser import BytesParser
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+from google.auth.exceptions import RefreshError
 
 import mail_report
 
@@ -60,6 +61,41 @@ class MailReportTests(unittest.TestCase):
         parser.feed('<tr class="stock-row"><td class="score-cell" data-sort-value="0">0（行情資料未齊）</td><td class="stock-cell" data-sort-value="0050 元大台灣50"><span>▶</span>0050 元大台灣50</td></tr>')
         self.assertEqual(parser.partial_scores, [(0, '0050', '元大台灣50')])
         self.assertEqual(parser.scores, [])
+
+
+    def test_interactive_authorization_recovers_revoked_refresh_token(self):
+        with tempfile.TemporaryDirectory() as folder:
+            client = Path(folder) / 'client_secret.json'
+            token = Path(folder) / 'gmail_token.json'
+            client.write_text('{"installed": {}}', encoding='utf-8')
+            token.write_text('{"refresh_token": "expired"}', encoding='utf-8')
+            old = Mock(expired=True, refresh_token='expired', valid=False)
+            old.refresh.side_effect = RefreshError('invalid_grant')
+            renewed = Mock(valid=True)
+            renewed.to_json.return_value = '{"refresh_token": "new-grant"}'
+            flow = Mock()
+            flow.run_local_server.return_value = renewed
+            with patch.object(mail_report.Credentials, 'from_authorized_user_file',
+                              return_value=old), patch.object(
+                    mail_report.InstalledAppFlow, 'from_client_secrets_file',
+                    return_value=flow):
+                self.assertIs(mail_report.load_credentials(client, token), renewed)
+            self.assertEqual(token.read_text(encoding='utf-8'), '{"refresh_token": "new-grant"}')
+            flow.run_local_server.assert_called_once_with(port=0)
+
+    def test_ci_auth_failure_explains_secret_replacement_without_browser(self):
+        with tempfile.TemporaryDirectory() as folder:
+            client = Path(folder) / 'client_secret.json'
+            token = Path(folder) / 'gmail_token.json'
+            token.write_text('{"refresh_token": "expired"}', encoding='utf-8')
+            old = Mock(expired=True, refresh_token='expired', valid=False)
+            old.refresh.side_effect = RefreshError('invalid_grant')
+            with patch.object(mail_report.Credentials, 'from_authorized_user_file',
+                              return_value=old), patch.object(
+                    mail_report.InstalledAppFlow, 'from_client_secrets_file') as interactive:
+                with self.assertRaisesRegex(RuntimeError, 'GMAIL_TOKEN_JSON'):
+                    mail_report.load_credentials(client, token, non_interactive=True)
+                interactive.assert_not_called()
 
 
 if __name__ == '__main__':

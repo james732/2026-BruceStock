@@ -137,8 +137,11 @@ def plan(store, anchor, recipient, requested=''):
     record = store.data['reports'].get(day)
     if record:
         receipt = delivery(record, recipient)
-        if receipt['status'] == 'sent' or receipt['attempts'] >= MAX_ATTEMPTS:
-            return {'run': False, 'reason': 'Already sent or two automatic send attempts exhausted'}
+        if receipt['status'] == 'sent':
+            return {'run': False, 'reason': 'Gmail delivery confirmed; no duplicate'}
+        if receipt['attempts'] >= MAX_ATTEMPTS:
+            return {'run': False, 'report_date': day, 'delivery_blocked': True,
+                    'reason': 'Gmail delivery NOT confirmed; two send attempts exhausted. Check the failed run logs and delivery ledger before manual recovery.'}
     return {'run': True, 'report_date': day, 'generate': record is None,
             'deploy': record is None or not record.get('deployed'), 'send': True,
             'mode': 'daily', 'official': True}
@@ -217,7 +220,12 @@ def output(values):
 
 
 def gmail_sender(day, recipient):
-    from mail_report import send_report
+    """Preauthorize Gmail before send_delivery reserves its bounded send attempt.
+
+    A failed refresh grant cannot have sent a message, so it must not use up a
+    Gmail-send attempt. Reuse the validated credentials for the actual call.
+    """
+    from mail_report import load_credentials, send_report
     metadata = json.loads((PUBLIC / 'report_metadata.json').read_text(encoding='utf-8'))
     if metadata['report_date'] != day or not metadata['official']:
         raise ValueError('Email metadata does not match official publication')
@@ -227,14 +235,17 @@ def gmail_sender(day, recipient):
                                    ('GMAIL_TOKEN_JSON', 'gmail_token.json')):
             data = json.loads(os.environ[variable])
             if not isinstance(data, dict) or (variable == 'GMAIL_TOKEN_JSON' and not data.get('refresh_token')):
-                raise ValueError('Invalid Gmail credentials')
+                raise ValueError('Invalid Gmail credentials; reauthorize and update GMAIL_TOKEN_JSON')
             path = Path(directory) / filename
             path.touch(mode=0o600)
             path.write_bytes(dump(data))
             paths.append(path)
-        return send_report(PUBLIC / 'analysis_momentum.html', recipient,
-            f'Stock analysis report - 評分v2 - {day} - r1', paths[0], paths[1],
-            non_interactive=True, metadata=metadata)
+        credentials = load_credentials(paths[0], paths[1], non_interactive=True)
+        # Temporary files are no longer needed once credentials are in memory.
+    return lambda: send_report(
+        PUBLIC / 'analysis_momentum.html', recipient,
+        f'Stock analysis report - 評分v2 - {day} - r1', paths[0], paths[1],
+        non_interactive=True, metadata=metadata, credentials=credentials)
 
 
 def main():
@@ -287,7 +298,8 @@ def main():
     else:
         # Verify the frozen files again immediately before reserving a send attempt.
         restore(store, day)
-        message_id = send_delivery(store, day, recipient, lambda: gmail_sender(day, recipient))
+        sender = gmail_sender(day, recipient)
+        message_id = send_delivery(store, day, recipient, sender)
         print('Gmail delivery checkpoint: ' + (message_id or 'skipped'))
 
 

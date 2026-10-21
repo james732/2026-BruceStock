@@ -128,18 +128,27 @@ jobs:
           GMAIL_CLIENT_SECRET_JSON: ${{ secrets.GMAIL_CLIENT_SECRET_JSON }}
           GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
         run: uv run --frozen report_delivery.py send
+      - name: Flag exhausted delivery without claiming success
+        if: steps.plan.outputs.delivery_blocked == 'true'
+        env:
+          REASON: ${{ steps.plan.outputs.reason }}
+        run: echo "::warning title=Email delivery not confirmed::$REASON"
       - name: Publication summary
         if: always()
         env:
           REPORT_DATE: ${{ steps.plan.outputs.report_date }}
           OFFICIAL: ${{ steps.plan.outputs.official }}
           REASON: ${{ steps.plan.outputs.reason }}
+          DELIVERY_BLOCKED: ${{ steps.plan.outputs.delivery_blocked }}
         shell: bash
         run: |
           {
             echo "### Stock report publication"
             echo "Batch: $REPORT_DATE; official: $OFFICIAL"
             echo "$REASON"
+            if [ "$DELIVERY_BLOCKED" = true ]; then
+              echo "**ACTION REQUIRED:** Email delivery remains unconfirmed after two recorded attempts; see failed runs and delivery.json."
+            fi
             echo "Official snapshots and delivery attempts are checkpointed on report-state."
             echo "At most two automatic Gmail calls per report revision and recipient; successful delivery skips later runs."
             echo "Preview runs generate artifacts only. GitHub schedule timing is best effort."
