@@ -10,6 +10,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 from google.auth.transport.requests import Request
+from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
@@ -132,7 +133,17 @@ def load_credentials(client_secret: Path, token_path: Path, non_interactive: boo
         credentials = Credentials.from_authorized_user_file(token_path, SCOPES)
 
     if credentials and credentials.expired and credentials.refresh_token:
-        credentials.refresh(Request())
+        try:
+            credentials.refresh(Request())
+        except RefreshError as exc:
+            if non_interactive:
+                raise RuntimeError(
+                    "Gmail OAuth refresh token expired or was revoked. No email was sent. "
+                    "Run 'uv run mail_report.py --authorize-only' locally to reauthorize, "
+                    "then replace the GitHub Actions secret GMAIL_TOKEN_JSON."
+                ) from exc
+            # The old token cannot be refreshed; interactively request a new grant.
+            credentials = None
 
     if not credentials or not credentials.valid:
         if non_interactive:
@@ -194,9 +205,11 @@ def send_report(
     token_path: Path,
     non_interactive: bool = False,
     metadata: dict | None = None,
+    credentials: Credentials | None = None,
 ) -> str:
     message = build_message(report_path, recipient, subject, metadata)
-    credentials = load_credentials(client_secret, token_path, non_interactive)
+    if credentials is None:
+        credentials = load_credentials(client_secret, token_path, non_interactive)
     raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
 
     with build("gmail", "v1", credentials=credentials) as service:
