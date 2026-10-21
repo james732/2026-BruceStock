@@ -78,7 +78,8 @@ API token 由環境變數 `FINMIND_TOKEN` 提供；未設定時會停止產生�
 指定 `--report` 時只附該檔案，指定 `--recipient` 可覆寫收件人。
 `run_report.bat` 先產生原版與 v2，成功後只寄出 v2。任一產生步驟失敗時不寄信。
 
-首次使用或 Gmail 授權失效時，在 PowerShell 執行下列指令完成授權（不會寄信）：
+首次使用或 Gmail 授權失效時，在 PowerShell 執行下列指令完成授權（不會寄信）。
+即使本機 `gmail_token.json` 的 Refresh Token 已失效，互動模式也會重新開啟 Google 授權頁面，取得新的授權：
 
 ```powershell
 uv run mail_report.py --authorize-only
@@ -138,6 +139,32 @@ GitHub run 建立時間作為穩定批次基準，舊 run 跨過窗口後重跑�
 請勿刪除或人工覆寫此分支；刪除寄送紀錄會失去去重依據。
 這些分數、報告、雜湊、run ID 和 Gmail message ID 依 repository 可見性保存，
 不存 Gmail 憑證；收件者以雜湊作為 ledger key。凍結報告長期保存在該分支，需留意儲存空間增長。
+
+### Gmail OAuth 授權失效處理
+
+如果 Actions 在 `Send frozen v2 report with bounded retries` 顯示
+`invalid_grant: Token has been expired or revoked`，代表 GitHub Actions Secret
+`GMAIL_TOKEN_JSON` 內的 Gmail Refresh Token 已失效。修改 workflow 或重跑失敗 job
+無法使已失效的 Google 授權恢復。
+
+請在具備 OAuth client JSON 的本機執行 `uv run mail_report.py --authorize-only`，
+登入實際負責發信的 Google 帳號並完成授權。確認本機 `gmail_token.json`
+存在且包含新的 `refresh_token` 後，到 GitHub repository
+**Settings → Secrets and variables → Actions → Repository secrets**
+更新 `GMAIL_TOKEN_JSON`，貼入整份 JSON；不要把該檔 commit、貼入 issue 或聊天。
+若原本的 OAuth client 不存在，也要從自己的 Google Cloud 專案重新取得對應的 OAuth client JSON。
+`GMAIL_CLIENT_SECRET_JSON` 仍須與所使用的 OAuth client 相符。
+
+從本次修正開始，雲端先檢查 Gmail 授權，再保留寄信額度。
+授權失效在送出 Gmail API request 前便中止，不扣同日兩次 Gmail 發送額度，
+所以更新 Secret 後，同一有效窗口內的後續排程可以自動恢復寄送。
+已經在舊程式中耗盡額度的日期不會自動重置：必須先核對失敗紀錄、
+寄件備份與 `report-state/delivery.json`，確認並無任何 Gmail API 成功寄出，
+才可人工執行受稽核的額度修復；不得直接刪除 ledger。
+
+若 Google OAuth consent screen 處於 **Testing**，某些權限的 Refresh Token
+可能有較短有效期限。應至自己的 Google Cloud 專案確認應用程式發布狀態與授權政策，
+並排查使用者撤銷授權、Token 失效等原因。
 
 ### 寄信與重試限制
 
