@@ -442,6 +442,17 @@ def compare_price(price: float, average: float) -> str:
     return "above" if price > average else "below"
 
 
+def stock_history_issue(stock_id: str, rows: list[dict[str, Any]], end_date: date) -> str | None:
+    """Reason a stock cannot be scored using recent price history."""
+    required = max(MA_WINDOWS)
+    if len(rows) < required:
+        return f"{stock_id} 歷史股價僅 {len(rows)} 筆（需至少 {required} 筆）；略過評分"
+    latest = max(date.fromisoformat(str(row["date"])) for row in rows)
+    if latest < end_date - timedelta(days=14):
+        return f"{stock_id} 最後行情日期 {latest.isoformat()}，距截止日超過 14 天；略過評分"
+    return None
+
+
 def analyze_price_rows(stock_id: str, rows: Iterable[dict[str, Any]]) -> PriceAnalysis:
     ordered_rows = sorted(rows, key=lambda row: str(row["date"]))
     required_rows = max(MA_WINDOWS)
@@ -1173,6 +1184,11 @@ def run_analysis(
         news_rows = client.fetch_stock_news(stock_id, end_date, days=3)
         price_rows = [row for row in price_rows if str(row["date"]) <= end_date_text]
         institution_rows = [row for row in institution_rows if str(row["date"]) <= end_date_text]
+        issue = stock_history_issue(stock_id, price_rows, end_date)
+        if issue:
+            client.warnings.append(issue)
+            print(f"::warning title=Stock skipped::{issue}", file=sys.stderr)
+            continue
         price_rows_by_stock[stock_id] = price_rows
         price_analyses.append(analyze_price_rows(stock_id, price_rows))
         score_histories[stock_id] = analyze_score_history(stock_id, price_rows, institution_rows)
@@ -1183,10 +1199,14 @@ def run_analysis(
         )
         stock_news.extend(analyze_news_rows(stock_id, news_rows))
 
+    valid_stock_ids = list(price_rows_by_stock)
+    if not valid_stock_ids:
+        raise ValueError("No stocks with enough recent price history to generate a report")
+    print(f"Eligible stocks: {len(valid_stock_ids)}/{len(stock_ids)}", file=sys.stderr)
     print("Fetching TDCC weekly holdings...", file=sys.stderr)
-    snapshots = tdcc_client.fetch_recent_snapshots(stock_ids, end_date, count=5)
+    snapshots = tdcc_client.fetch_recent_snapshots(valid_stock_ids, end_date, count=5)
     weekly_holdings = analyze_weekly_holdings(
-        stock_ids, snapshots, price_rows_by_stock, display_weeks=4
+        valid_stock_ids, snapshots, price_rows_by_stock, display_weeks=4
     )
 
     return price_analyses, institutional_days, weekly_holdings, stock_news, stock_names, score_histories
