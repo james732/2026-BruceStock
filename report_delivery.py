@@ -127,8 +127,15 @@ def delivery(record, recipient):
         {'attempts': 0, 'status': 'pending'})
 
 
-def plan(store, anchor, recipient, requested=''):
+def plan(store, anchor, recipient, requested='', early_today=False):
     due = latest_due_date(anchor)
+    if early_today:
+        local = anchor.astimezone(TAIPEI)
+        if local.time() >= time(20, 18):
+            raise ValueError('Early publication is only valid before 20:18 Taipei time')
+        if not requested or date.fromisoformat(requested) != local.date():
+            raise ValueError('Early publication requires an explicit end_date matching today')
+        due = local.date()
     if requested and date.fromisoformat(requested) != due:
         raise ValueError('Official publication must use the latest due date; use preview for historical dates')
     day = due.isoformat()
@@ -261,14 +268,23 @@ def main():
         anchor = api.anchor()
         official = os.environ.get('GITHUB_EVENT_NAME') == 'schedule' or os.environ.get('SEND_EMAIL') == 'true'
         requested = os.environ.get('END_DATE', '').strip()
+        early_today = os.environ.get('EARLY_PUBLISH', 'false') == 'true'
+        if early_today and (os.environ.get('GITHUB_EVENT_NAME') != 'workflow_dispatch'
+                             or os.environ.get('SEND_EMAIL') != 'true'):
+            raise ValueError('Early publication requires manual dispatch with send_email enabled')
         if official:
             if os.environ.get('GITHUB_REF') != 'refs/heads/main':
                 raise ValueError('Official publication must run from main')
             store = Store(api)
-            if latest_due_date(anchor) != latest_due_date(datetime.now(TAIPEI)):
+            current = datetime.now(TAIPEI)
+            if early_today:
+                stale = (anchor.astimezone(TAIPEI).date() != current.date())
+            else:
+                stale = latest_due_date(anchor) != latest_due_date(current)
+            if stale:
                 values = {'run': False, 'reason': 'Expired run; a fresh schedule will handle latest due date'}
             else:
-                values = plan(store, anchor, recipient, requested)
+                values = plan(store, anchor, recipient, requested, early_today=early_today)
             if values['run'] and not values['generate']:
                 restore(store, values['report_date'])
         else:
@@ -288,7 +304,12 @@ def main():
         return
     store = Store(GitHub())
     # Do not publish an expired batch after the next daily publication is due.
-    if day != latest_due_date(datetime.now(TAIPEI)).isoformat():
+    current = datetime.now(TAIPEI)
+    early_today = os.environ.get('EARLY_PUBLISH', 'false') == 'true'
+    eligible = day == latest_due_date(current).isoformat()
+    if early_today and os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch':
+        eligible = eligible or day == current.date().isoformat()
+    if not eligible:
         raise ValueError('Batch expired while running; next run will process latest due date')
     if args.command == 'freeze':
         freeze(store, day)
