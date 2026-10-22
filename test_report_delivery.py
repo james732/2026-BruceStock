@@ -53,6 +53,34 @@ class DeliveryTests(unittest.TestCase):
             ('2026-10-19T20:18:00+08:00', '2026-10-19')]:
             self.assertEqual(d.latest_due_date(anchor(timestamp)).isoformat(), expected)
 
+    def test_early_manual_publication_today_and_evening_dedup(self):
+        store = MemoryStore()
+        at = anchor('2026-10-22T17:31:00+08:00')
+        self.assertEqual(d.latest_due_date(at).isoformat(), '2026-10-21')
+        options = d.plan(store, at, 'b@example.com', '2026-10-22', early_today=True)
+        self.assertEqual(options['report_date'], '2026-10-22')
+        self.assertTrue(options['generate'])
+        self.assertTrue(options['deploy'])
+        self.assertTrue(options['send'])
+        store.data['reports']['2026-10-22'] = {'deployed': True, 'deliveries': {}}
+        sender = Mock(return_value='accepted-id')
+        self.assertEqual(d.send_delivery(store, '2026-10-22', 'b@example.com', sender), 'accepted-id')
+        self.assertFalse(d.plan(store, anchor('2026-10-22T20:30:00+08:00'),
+                                'b@example.com')['run'])
+        sender.assert_called_once()
+
+    def test_early_manual_publication_requires_explicit_today_before_cutoff(self):
+        store = MemoryStore()
+        at = anchor('2026-10-22T17:31:00+08:00')
+        for requested in ('', '2026-10-21', '2026-10-23'):
+            with self.subTest(requested=requested), self.assertRaises(ValueError):
+                d.plan(store, at, 'b@example.com', requested, early_today=True)
+        with self.assertRaises(ValueError):
+            d.plan(store, anchor('2026-10-22T20:18:00+08:00'), 'b@example.com',
+                   '2026-10-22', early_today=True)
+        with self.assertRaises(ValueError):
+            d.plan(store, at, 'b@example.com', '2026-10-22')
+
     def test_rollout_does_not_backfill_old_mail(self):
         store = MemoryStore()
         self.assertFalse(d.plan(store, anchor('2026-10-18T19:00:00+08:00'), 'b@example.com')['run'])
