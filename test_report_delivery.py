@@ -65,6 +65,13 @@ class DeliveryTests(unittest.TestCase):
         store.data['reports']['2026-10-22'] = {'deployed': True, 'deliveries': {}}
         sender = Mock(return_value='accepted-id')
         self.assertEqual(d.send_delivery(store, '2026-10-22', 'b@example.com', sender), 'accepted-id')
+        # Before 20:18 the normal due date is still yesterday; don't resend it
+        # automatically after today's early report was already emailed.
+        before_due = d.plan(store, anchor('2026-10-22T18:18:00+08:00'), 'b@example.com')
+        self.assertFalse(before_due['run'])
+        self.assertIn('superseded', before_due['reason'])
+        self.assertTrue(d.plan(store, anchor('2026-10-22T18:18:00+08:00'),
+                               'different@example.com')['run'])
         self.assertFalse(d.plan(store, anchor('2026-10-22T20:30:00+08:00'),
                                 'b@example.com')['run'])
         sender.assert_called_once()
