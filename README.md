@@ -1,6 +1,9 @@
-# FinMind 台股分析
+# FinMind 台股評分 v2
 
-此程式會依 `target.txt` 的股票代碼，從 FinMind 取得資料並產生 `analysis.html`，內容包括：
+**正式網站、GitHub Actions 與 Gmail 現在只發布／寄送評分 v2。** 網站首頁 `index.html` 為評分 v2 的副本；`analysis.html` 和 `analysis_param.html` 已從正式產生與 Pages 部署清單移除。舊版函式仍留在 `main.py` 供評分 v2 共用與離線測試使用。
+
+
+舊版單獨執行 `main.py` 的功能說明（正式排程已停用該入口）：
 
 - 最近五個交易日的法人買進、賣出與淨額。
 - 最近四個完整 TDCC 週次的收盤、週漲跌與三個大戶持股級距。
@@ -124,7 +127,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install_schedule.ps1
 - `market_as_of`：最近已收盤交易日，可能與批次日期不同。
 - `generated_at`、`data_observed_at`：實際產生與取得資料時間。
   延遲補跑使用當時取得的資料，不宣稱重現原定 20:18 的歷史資訊。
-- 每日正式版目前固定 r1，首次產生即凍結 HTML 與 SHA-256，後續部署／寄信重試沿用同一份內容。
+- 每日正式版預設 r1，首次產生即凍結 HTML 與 SHA-256，後續部署／寄信重試沿用同一份內容。若同日已寄送後明確要求修訂，僅能透過受控手動 `reissue_report` 產生 r2，原 r1 寄送紀錄與檔案不覆寫。
   不會因多次喚醒而重新計分。修改股票清單或程式，於下一份尚未產生的日報生效。
 - `report_metadata.json` 同時放進網站與 artifact；信件日期和時間讀取 metadata，
   不依寄送當下日期或下載附件的檔案時間推測。
@@ -133,7 +136,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install_schedule.ps1
 GitHub run 建立時間作為穩定批次基準，舊 run 跨過窗口後重跑會跳過；應使用新的手動 run。
 原始排程事件沒有可靠的預定觸發日期，因此此機制按「最近已到期工作」運作。
 
-`report-state` 分支保存 `delivery.json` 與 `reports/YYYY-MM-DD/r1/` 的凍結報告。
+`report-state` 分支保存 `delivery.json` 與 `reports/YYYY-MM-DD/r1/`、必要時的 `r2/` 凍結報告；既有日報沿用日期為鍵，r2 額外保存於 `YYYY-MM-DD-r2` 紀錄鍵。
 每次變更以 Git commit 和非強制 ref 更新作為持久 checkpoint，保留原狀態並檢查衝突。
 分支已存在但內容損壞、權限錯誤或讀取失敗都會停止，不能當成尚未寄送。
 請勿刪除或人工覆寫此分支；刪除寄送紀錄會失去去重依據。
@@ -187,10 +190,9 @@ Actions → Generate stock report → Run workflow（main）：
 - **勾選 `send_email`**：正式發布最近已到 20:18 的日報，收件者預設 Bruce。
   `end_date` 應留空，或與最近到期日期一致；不能用此入口發布過往日期覆蓋網站。
   已寄過相同收件者便跳過；需要另寄一位收件者可填 `recipient`。
-- 手動寄送同樣最多兩次嘗試，不提供繞過上限或強制改寫 r1 的選項。
+- 手動寄送同樣每版本、每收件者最多兩次嘗試。已發布 r1 的當天若要明確再發新版，勾選 `send_email`、`publish_today`、`reissue_report` 並指定當日 `end_date`；新版另存 r2，不覆寫 r1，成功寄出後同日排程自動去重。
 
-artifact 保留 30 天。正式網站僅展示最近成功發布內容，保留 `index.html`、
-`analysis.html`、`analysis_param.html`、`analysis_momentum.html` 與 metadata。
+artifact 保留 30 天。正式網站僅提供 `index.html`（評分 v2 首頁）、`analysis_momentum.html` 與 `report_metadata.json`。
 產生失敗不部署；既有正式報告保持不變。憑證、原始碼、SQLite 不會放進網站或 artifact。
 SQLite／TDCC 快取仍由 Actions cache 還原與保存；cache 可清除，不承擔寄送去重責任。
 
@@ -206,7 +208,7 @@ uv run main.py
 
 ## 評分v2新頁面
 
-雲端提供 `analysis_momentum.html`，保留原報告並提供頁首切換；正式排程會寄送 v2 附件。
+雲端只提供 `analysis_momentum.html`，不再顯示原版與原版參數頁的頁首連結；正式排程僅寄送 v2 HTML 附件。
 本機另執行 `uv run momentum_report.py`；參數設定在 `momentum_config.json`。
 規則、資料映射、缺資料及重複扣分說明見 [MOMENTUM.md](MOMENTUM.md)。
 
