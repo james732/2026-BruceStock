@@ -134,6 +134,39 @@ class DeliveryTests(unittest.TestCase):
             self.assertFalse(d.plan(store, anchor('2026-10-22T18:30:00+08:00'),
                                     'b@example.com')['run'])
 
+    def test_reuse_frozen_r1_removes_navigation_without_finmind(self):
+        store = MemoryStore()
+        with tempfile.TemporaryDirectory() as folder:
+            dest = Path(folder)
+            fixture(dest, day='2026-10-22')
+            old_nav = ('<nav><a href="analysis.html">原版報告</a> · '
+                       '<a href="analysis_param.html">原版參數頁</a> · '
+                       '<a href="analysis_momentum.html" aria-current="page">評分v2</a></nav>')
+            source = '<!doctype html><html><body>' + old_nav + COMPLETE_ROW + '</body></html>'
+            (dest / 'analysis_momentum.html').write_text(source, encoding='utf-8')
+            (dest / 'index.html').write_text(source, encoding='utf-8')
+            d.freeze(store, '2026-10-22', dest)
+            store.data['reports']['2026-10-22']['deployed'] = True
+            original = copy.deepcopy(store.data['reports']['2026-10-22'])
+            d.reissue_v2_from_r1(store, '2026-10-22', dest)
+            content = (dest / 'analysis_momentum.html').read_text(encoding='utf-8')
+            self.assertNotIn('原版報告', content)
+            self.assertNotIn('analysis_param.html', content)
+            self.assertIn('沿用今日 r1 的行情與評分資料', content)
+            self.assertNotIn('正式日報：2026-10-22 · r1', content)
+            generated = json.loads((dest / 'generation.json').read_text(encoding='utf-8'))
+            self.assertEqual(generated['source_revision'], 1)
+            d.freeze(store, '2026-10-22', dest, revision=2)
+            r2 = json.loads((dest / 'report_metadata.json').read_text(encoding='utf-8'))
+            self.assertEqual(r2['revision'], 2)
+            self.assertEqual(r2['source_revision'], 1)
+            self.assertEqual(store.data['reports']['2026-10-22'], original)
+            self.assertEqual(set(store.data['reports']['2026-10-22-r2']['files']),
+                             {'index.html', 'analysis_momentum.html', 'report_metadata.json'})
+            d.restore(store, '2026-10-22', dest)
+            self.assertIn('正式日報：2026-10-22 · r2',
+                          (dest / 'analysis_momentum.html').read_text(encoding='utf-8'))
+
     def test_reissue_needs_prior_r1_and_explicit_early_publication(self):
         store = MemoryStore()
         now = anchor('2026-10-22T17:45:00+08:00')
