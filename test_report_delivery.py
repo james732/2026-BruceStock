@@ -39,7 +39,7 @@ def fixture(directory, day='2026-10-18'):
                     generated_at='2026-10-19T00:39:00+08:00',
                     data_observed_at='2026-10-19T00:39:02+08:00', mode='daily')
     (directory / 'generation.json').write_text(json.dumps(metadata), encoding='utf-8')
-    for name in ('index.html', 'analysis.html', 'analysis_param.html', 'analysis_momentum.html'):
+    for name in ('index.html', 'analysis_momentum.html'):
         (directory / name).write_text('<html><body>' + COMPLETE_ROW + '</body></html>', encoding='utf-8')
 
 
@@ -95,6 +95,53 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(plan['report_date'], '2026-10-25')
         with self.assertRaises(ValueError):
             d.plan(store, anchor('2026-10-25T22:00:00+08:00'), 'b@example.com', '2026-10-18')
+
+    def test_reissue_preserves_sent_r1_and_archives_r2_separately(self):
+        store = MemoryStore()
+        with tempfile.TemporaryDirectory() as folder:
+            dest = Path(folder)
+            fixture(dest, day='2026-10-22')
+            d.freeze(store, '2026-10-22', dest)
+            record = store.data['reports']['2026-10-22']
+            record['deployed'] = True
+            d.send_delivery(store, '2026-10-22', 'b@example.com',
+                            Mock(return_value='original-gmail-id'))
+            original = copy.deepcopy(store.data['reports']['2026-10-22'])
+            self.assertEqual(original['deliveries'][d.recipient_key('b@example.com')]['status'], 'sent')
+            early = d.plan(store, anchor('2026-10-22T17:45:00+08:00'), 'b@example.com',
+                           '2026-10-22', early_today=True, reissue=True)
+            self.assertTrue(early['generate'])
+            self.assertEqual(early['revision'], 2)
+            fixture(dest, day='2026-10-22')
+            d.freeze(store, '2026-10-22', dest, revision=2)
+            self.assertEqual(store.data['reports']['2026-10-22'], original)
+            self.assertIn('reports/2026-10-22/r1/analysis_momentum.html', store.files)
+            self.assertIn('reports/2026-10-22/r2/analysis_momentum.html', store.files)
+            self.assertEqual(set(store.data['reports']['2026-10-22-r2']['files']),
+                             {'analysis_momentum.html', 'index.html', 'report_metadata.json'})
+            self.assertNotIn('analysis.html', store.data['reports']['2026-10-22-r2']['files'])
+            with self.assertRaisesRegex(ValueError, 'Cannot overwrite'):
+                d.freeze(store, '2026-10-22', dest, revision=2)
+            store.data['reports']['2026-10-22-r2']['deployed'] = True
+            receipt = d.send_delivery(store, '2026-10-22', 'b@example.com',
+                                      Mock(return_value='new-gmail-id'))
+            self.assertEqual(receipt, 'new-gmail-id')
+            self.assertEqual(store.data['reports']['2026-10-22'], original)
+            self.assertEqual(d.active_revision(store, '2026-10-22'), 2)
+            self.assertFalse(d.plan(store, anchor('2026-10-22T20:30:00+08:00'),
+                                    'b@example.com')['run'])
+            self.assertFalse(d.plan(store, anchor('2026-10-22T18:30:00+08:00'),
+                                    'b@example.com')['run'])
+
+    def test_reissue_needs_prior_r1_and_explicit_early_publication(self):
+        store = MemoryStore()
+        now = anchor('2026-10-22T17:45:00+08:00')
+        with self.assertRaises(ValueError):
+            d.plan(store, now, 'b@example.com', '2026-10-22',
+                   early_today=True, reissue=True)
+        store.data['reports']['2026-10-22'] = {'deployed': True, 'deliveries': {}}
+        with self.assertRaises(ValueError):
+            d.plan(store, now, 'b@example.com', '2026-10-22', reissue=True)
 
     def test_freeze_restore_and_hash_validation(self):
         store = MemoryStore()
