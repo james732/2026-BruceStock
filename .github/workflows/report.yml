@@ -11,6 +11,11 @@ on:
         required: false
         type: boolean
         default: false
+      publish_today:
+        description: "Explicit early official release of today's dated report before 20:18 (requires send_email=true and end_date=today)"
+        required: false
+        type: boolean
+        default: false
       recipient:
         description: "Recipient for an explicitly requested manual publication"
         required: false
@@ -41,6 +46,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       END_DATE: ${{ inputs.end_date }}
       SEND_EMAIL: ${{ inputs.send_email }}
+      EARLY_PUBLISH: ${{ inputs.publish_today }}
       RECIPIENT: ${{ github.event_name == 'schedule' && 'bruce.sy.chen@gmail.com' || inputs.recipient || 'bruce.sy.chen@gmail.com' }}
     steps:
       - uses: actions/checkout@v4
