@@ -120,6 +120,7 @@ class DeliveryTests(unittest.TestCase):
             self.assertEqual(set(store.data['reports']['2026-10-22-r2']['files']),
                              {'analysis_momentum.html', 'index.html', 'report_metadata.json'})
             self.assertNotIn('analysis.html', store.data['reports']['2026-10-22-r2']['files'])
+            fixture(dest, day='2026-10-22')
             with self.assertRaisesRegex(ValueError, 'Cannot overwrite'):
                 d.freeze(store, '2026-10-22', dest, revision=2)
             store.data['reports']['2026-10-22-r2']['deployed'] = True
