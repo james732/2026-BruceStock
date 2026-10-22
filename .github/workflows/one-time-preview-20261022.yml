@@ -1,4 +1,5 @@
 name: One-time stock report preview (2026-10-22)
+# Eligibility retry
 on:
   push:
     branches: [main]
