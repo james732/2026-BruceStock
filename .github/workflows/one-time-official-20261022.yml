@@ -1,0 +1,21 @@
+name: One-time early official publication (2026-10-22)
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/one-time-official-20261022.yml
+permissions:
+  actions: write
+  contents: read
+jobs:
+  dispatch:
+    if: github.event.head_commit.message == '[one-time] Publish and email 2026-10-22 report'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch official publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run report.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f end_date=2026-10-22 -f send_email=true \
+            -f publish_today=true -f recipient=bruce.sy.chen@gmail.com
