@@ -299,7 +299,10 @@ class MomentumPageTests(unittest.TestCase):
     def test_generate_with_network_mocks_and_missing_tdcc(self):
         remote=Mock(); remote._fetch_rows.return_value=[{'date':'2026-10-06'}]
         remote.fetch_stock_names.return_value={'2330':'台積電'}
-        cache=Mock(); cache.fetch.return_value=[]; cache.fetch_stock_news.return_value=[]; cache.warnings=[]
+        cache=Mock(); cache.fetch_stock_news.return_value=[]; cache.warnings=[]
+        price_rows=[{'date': (date(2026,10,6)-timedelta(days=59-i)).isoformat(),
+                     'close': 100+i, 'Trading_Volume': 1000+i} for i in range(60)]
+        cache.fetch.side_effect=lambda dataset, *args: price_rows if dataset == 'TaiwanStockPrice' else []
         tdcc=Mock(); tdcc.fetch_recent_snapshots.side_effect=RuntimeError('missing')
         now=datetime(2026,10,7,11,tzinfo=TAIPEI_TIMEZONE)
         s=generate(['2330'],now.date(),remote,cache,tdcc,Config(),now)
