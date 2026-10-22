@@ -141,6 +141,13 @@ def plan(store, anchor, recipient, requested='', early_today=False):
     day = due.isoformat()
     if due < date.fromisoformat(store.data['start_date']):
         return {'run': False, 'reason': 'Before rollout start date'}
+    if not requested and due < anchor.astimezone(TAIPEI).date():
+        # An early manual release of today's official report supersedes any
+        # automatic retry of yesterday's already-outdated email.
+        current_day = anchor.astimezone(TAIPEI).date().isoformat()
+        newer = store.data['reports'].get(current_day)
+        if newer and delivery(newer, recipient)['status'] == 'sent':
+            return {'run': False, 'reason': 'Current-day official report already emailed; superseded older retry'}
     record = store.data['reports'].get(day)
     if record:
         receipt = delivery(record, recipient)
