@@ -88,10 +88,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p public
-          uv run --frozen momentum_report.py --end-date "$REPORT_DATE" --mode "$REPORT_MODE" --output public/analysis_momentum.html --metadata-output public/generation.json
-          cp public/analysis_momentum.html public/index.html
+          if [ "$REISSUE_REPORT" = true ]; then
+            # Only page presentation changed; reuse the verified, frozen r1 scores.
+            uv run --frozen report_delivery.py reuse-r1
+          else
+            uv run --frozen momentum_report.py --end-date "$REPORT_DATE" --mode "$REPORT_MODE" --output public/analysis_momentum.html --metadata-output public/generation.json
+            cp public/analysis_momentum.html public/index.html
+          fi
           test -s public/index.html
           test -s public/analysis_momentum.html
+          test -s public/generation.json
       - name: Freeze report and checkpoint before deployment
         if: steps.plan.outputs.generate == 'true'
         env:
