@@ -1,4 +1,5 @@
 name: One-time v2-only r2 publication (2026-10-22)
+# frozen-r1 retry
 on:
   push:
     branches: [main]
