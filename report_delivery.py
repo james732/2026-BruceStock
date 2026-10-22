@@ -229,6 +229,67 @@ def freeze(store, day, directory=PUBLIC, official=True, revision=1):
         store.save({f'reports/{day}/r{revision}/{name}': content for name, content in files.items()})
 
 
+def reissue_v2_from_r1(store, day, directory=PUBLIC):
+    """Reuse a verified, frozen r1 dataset for a presentation-only r2 change.
+
+    FinMind may throttle/deny new queries; scores must be labeled with the
+    original observation time, rather than claiming fresh market data.
+    """
+    if active_key(store, day) != day:
+        raise ValueError('An r2 report already exists; restore it rather than regenerate')
+    root = store.data['reports'].get(day)
+    if not root or not root.get('deployed'):
+        raise ValueError('An already-deployed official r1 is required for a presentation-only reissue')
+    old_files = root['files']
+    required = ('analysis_momentum.html', 'report_metadata.json')
+    for name in required:
+        if name not in old_files:
+            raise ValueError('Missing archived r1 input: ' + name)
+    def original(name):
+        raw = store.read(f'reports/{day}/r1/{name}')
+        if digest(raw) != old_files[name]:
+            raise ValueError('Archived r1 hash mismatch: ' + name)
+        return raw
+
+    info = json.loads(original('report_metadata.json'))
+    if info['report_date'] != day or info.get('revision') != 1 or not info.get('official'):
+        raise ValueError('Original r1 metadata is not an official daily report')
+    content = original('analysis_momentum.html').decode('utf-8')
+    if not content.startswith('<!doctype html>'):
+        raise ValueError('Unexpected original report format')
+    old_banner = (f'<aside class="notice"><strong>正式日報：{html.escape(day)} · r1</strong>'
+                  f' · 行情資料日：{html.escape(info["market_as_of"])}'
+                  f' · 產生時間：{html.escape(info["generated_at"])}'
+                  '<br>資料於實際執行時取得；同一正式版本重試沿用相同內容。</aside>')
+    if '<body>' + old_banner not in content:
+        raise ValueError('Archived r1 banner mismatch')
+    content = content.replace('<body>' + old_banner, '<body>', 1)
+    old_nav = ('<nav><a href="analysis.html">原版報告</a> · '
+               '<a href="analysis_param.html">原版參數頁</a> · '
+               '<a href="analysis_momentum.html" aria-current="page">評分v2</a></nav>')
+    if old_nav not in content:
+        raise ValueError('Archived r1 is missing the expected legacy navigation')
+    content = content.replace(old_nav, '', 1)
+    note = ('<aside class="notice">r2 版面更新：沿用今日 r1 的行情與評分資料，'
+            '未重新抓取市場資料。</aside>')
+    content = content.replace('<body>', '<body>' + note, 1)
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / 'analysis_momentum.html').write_text(content, encoding='utf-8')
+    (directory / 'index.html').write_text(content, encoding='utf-8')
+    generation = {
+        'report_date': day,
+        'market_as_of': info['market_as_of'],
+        'generated_at': info['generated_at'],
+        'data_observed_at': info['data_observed_at'],
+        'mode': info['mode'],
+        'source_revision': 1,
+        'reissue_type': 'presentation_only',
+    }
+    (directory / 'generation.json').write_text(
+        json.dumps(generation, ensure_ascii=False, indent=2), encoding='utf-8')
+    print('Reused verified r1 momentum HTML and removed legacy navigation for r2')
+
+
 def send_delivery(store, day, recipient, sender):
     record = store.data['reports'][active_key(store, day)]
     if not record['deployed']:
@@ -288,7 +349,7 @@ def gmail_sender(day, recipient):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('prepare', 'freeze', 'deployed', 'send'))
+    parser.add_argument('command', choices=('prepare', 'reuse-r1', 'freeze', 'deployed', 'send'))
     args = parser.parse_args()
     recipient = os.environ.get('RECIPIENT', 'bruce.sy.chen@gmail.com').strip()
     if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', recipient):
@@ -346,7 +407,14 @@ def main():
         eligible = eligible or day == current.date().isoformat()
     if not eligible:
         raise ValueError('Batch expired while running; next run will process latest due date')
-    if args.command == 'freeze':
+    if args.command == 'reuse-r1':
+        if (os.environ.get('REISSUE_REPORT') != 'true'
+                or os.environ.get('EARLY_PUBLISH') != 'true'
+                or os.environ.get('GITHUB_EVENT_NAME') != 'workflow_dispatch'
+                or os.environ.get('SEND_EMAIL') != 'true'):
+            raise ValueError('Frozen r1 reuse is restricted to explicit manual r2 publication')
+        reissue_v2_from_r1(store, day)
+    elif args.command == 'freeze':
         freeze(store, day, revision=2 if os.environ.get('REISSUE_REPORT') == 'true' else 1)
     elif args.command == 'deployed':
         store.data['reports'][active_key(store, day)]['deployed'] = True
