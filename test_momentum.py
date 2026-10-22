@@ -293,7 +293,7 @@ class MomentumPageTests(unittest.TestCase):
         self.assertIn('aria-expanded="false"',s)
         self.assertIn('class="institution-details stock-detail" hidden',s)
         self.assertLess(s.index('查看 11 條評分規則與輸入值'), s.index('近三日個股新聞'))
-        self.assertIn('analysis_momentum.html',s)
+        self.assertIn('<h1>評分v2</h1>', s)
         self.assertNotIn('原版報告', s)
         self.assertNotIn('原版參數頁', s)
         self.assertNotIn('href="analysis.html"', s)
