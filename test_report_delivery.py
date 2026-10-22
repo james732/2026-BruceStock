@@ -3,7 +3,7 @@ import json
 import os
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -219,7 +219,9 @@ class DeliveryTests(unittest.TestCase):
         remote._fetch_rows.return_value = [{'date': '2026-10-16'}]
         remote.fetch_stock_names.return_value = {'2330': '台積電'}
         cache = Mock()
-        cache.fetch.return_value = []
+        rows = [{'date': (datetime(2026, 10, 16) - timedelta(days=59-i)).date().isoformat(),
+                 'close': 100+i, 'Trading_Volume': 1000+i} for i in range(60)]
+        cache.fetch.side_effect = lambda dataset, *args: rows if dataset == 'TaiwanStockPrice' else []
         cache.fetch_stock_news.return_value = []
         cache.warnings = []
         tdcc = Mock()
