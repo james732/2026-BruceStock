@@ -146,7 +146,7 @@ def plan(store, anchor, recipient, requested='', early_today=False):
         # automatic retry of yesterday's already-outdated email.
         current_day = anchor.astimezone(TAIPEI).date().isoformat()
         newer = store.data['reports'].get(current_day)
-        if newer and delivery(newer, recipient)['status'] == 'sent':
+        if newer and newer.get('deliveries', {}).get(recipient_key(recipient), {}).get('status') == 'sent':
             return {'run': False, 'reason': 'Current-day official report already emailed; superseded older retry'}
     record = store.data['reports'].get(day)
     if record:
