@@ -84,6 +84,7 @@ jobs:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
           REPORT_DATE: ${{ steps.plan.outputs.report_date }}
           REPORT_MODE: ${{ steps.plan.outputs.mode }}
+          OFFICIAL: ${{ steps.plan.outputs.official }}
         shell: bash
         run: |
           set -euo pipefail
