@@ -16,6 +16,11 @@ on:
         required: false
         type: boolean
         default: false
+      reissue_report:
+        description: "One-time audited r2 resend for today's already-issued official report (requires send_email and publish_today)"
+        required: false
+        type: boolean
+        default: false
       recipient:
         description: "Recipient for an explicitly requested manual publication"
         required: false
@@ -47,6 +52,7 @@ jobs:
       END_DATE: ${{ inputs.end_date }}
       SEND_EMAIL: ${{ inputs.send_email }}
       EARLY_PUBLISH: ${{ inputs.publish_today }}
+      REISSUE_REPORT: ${{ inputs.reissue_report }}
       RECIPIENT: ${{ github.event_name == 'schedule' && 'bruce.sy.chen@gmail.com' || inputs.recipient || 'bruce.sy.chen@gmail.com' }}
     steps:
       - uses: actions/checkout@v4
@@ -82,11 +88,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p public
-          uv run --frozen main.py --end-date "$REPORT_DATE" --output public/analysis.html
           uv run --frozen momentum_report.py --end-date "$REPORT_DATE" --mode "$REPORT_MODE" --output public/analysis_momentum.html --metadata-output public/generation.json
-          cp public/analysis.html public/index.html
+          cp public/analysis_momentum.html public/index.html
           test -s public/index.html
-          test -s public/analysis_param.html
           test -s public/analysis_momentum.html
       - name: Freeze report and checkpoint before deployment
         if: steps.plan.outputs.generate == 'true'
