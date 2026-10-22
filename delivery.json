@@ -76,7 +76,14 @@
       }
     },
     "2026-10-22": {
-      "deliveries": {},
+      "deliveries": {
+        "7cc2f1e0d698f6d27b55614b3515f5b5cd6e7d14ed97140b52f9f6d09dddfa23": {
+          "attempted_at": "2026-10-22T17:36:46.007195+08:00",
+          "attempts": 1,
+          "run_id": "39756372295",
+          "status": "sending"
+        }
+      },
       "deployed": true,
       "files": {
         "analysis.html": "1f2e1ce5f58e5c637aaf65494ce1081a1d59b4b6210b60d694cd239698ff947b",
