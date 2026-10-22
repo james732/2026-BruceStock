@@ -127,7 +127,17 @@ def delivery(record, recipient):
         {'attempts': 0, 'status': 'pending'})
 
 
-def plan(store, anchor, recipient, requested='', early_today=False):
+def active_key(store, day):
+    """Keep the immutable r1 archive; r2 is a separate ledger entry."""
+    reissued = f'{day}-r2'
+    return reissued if reissued in store.data['reports'] else day
+
+
+def active_revision(store, day):
+    return 2 if active_key(store, day) != day else 1
+
+
+def plan(store, anchor, recipient, requested='', early_today=False, reissue=False):
     due = latest_due_date(anchor)
     if early_today:
         local = anchor.astimezone(TAIPEI)
@@ -139,16 +149,22 @@ def plan(store, anchor, recipient, requested='', early_today=False):
     if requested and date.fromisoformat(requested) != due:
         raise ValueError('Official publication must use the latest due date; use preview for historical dates')
     day = due.isoformat()
+    if reissue and (not early_today or not requested or day not in store.data['reports']):
+        raise ValueError('r2 reissue requires an existing official r1 and explicit early manual publication')
     if due < date.fromisoformat(store.data['start_date']):
         return {'run': False, 'reason': 'Before rollout start date'}
     if not requested and due < anchor.astimezone(TAIPEI).date():
         # An early manual release of today's official report supersedes any
         # automatic retry of yesterday's already-outdated email.
         current_day = anchor.astimezone(TAIPEI).date().isoformat()
-        newer = store.data['reports'].get(current_day)
+        newer = store.data['reports'].get(active_key(store, current_day))
         if newer and newer.get('deliveries', {}).get(recipient_key(recipient), {}).get('status') == 'sent':
             return {'run': False, 'reason': 'Current-day official report already emailed; superseded older retry'}
-    record = store.data['reports'].get(day)
+    key = active_key(store, day)
+    record = store.data['reports'].get(key)
+    if reissue and key == day:
+        # A one-time r2 has been explicitly requested; preserve r1 and its sent ledger.
+        record = None
     if record:
         receipt = delivery(record, recipient)
         if receipt['status'] == 'sent':
@@ -158,35 +174,38 @@ def plan(store, anchor, recipient, requested='', early_today=False):
                     'reason': 'Gmail delivery NOT confirmed; two send attempts exhausted. Check the failed run logs and delivery ledger before manual recovery.'}
     return {'run': True, 'report_date': day, 'generate': record is None,
             'deploy': record is None or not record.get('deployed'), 'send': True,
-            'mode': 'daily', 'official': True}
+            'mode': 'daily', 'official': True,
+            'revision': 2 if reissue or key != day else 1}
 
 
 def restore(store, day, destination=PUBLIC):
-    record = store.data['reports'][day]
+    record = store.data['reports'][active_key(store, day)]
     destination.mkdir(parents=True, exist_ok=True)
     for name, expected in record['files'].items():
         if Path(name).name != name:
             raise ValueError('Invalid stored report filename')
-        content = store.read(f'reports/{day}/r1/{name}')
+        content = store.read(f'reports/{day}/r{active_revision(store, day)}/{name}')
         if digest(content) != expected:
             raise ValueError('Frozen report hash mismatch')
         (destination / name).write_bytes(content)
 
 
-def freeze(store, day, directory=PUBLIC, official=True):
+def freeze(store, day, directory=PUBLIC, official=True, revision=1):
+    if revision not in (1, 2):
+        raise ValueError('Unsupported report revision')
     metadata = json.loads((directory / 'generation.json').read_text(encoding='utf-8'))
     if metadata['report_date'] != day:
         raise ValueError('Generated report date does not match publication date')
-    metadata.update(revision=1, scheduled_for=f'{day}T20:18:00+08:00',
+    metadata.update(revision=revision, scheduled_for=f'{day}T20:18:00+08:00',
                     run_id=os.environ.get('GITHUB_RUN_ID', 'local'),
                     source_sha=os.environ.get('GITHUB_SHA', 'local'),
                     official=official)
     banner = (f'<aside class="notice"><strong>{"正式日報" if official else "預覽報告"}：'
-              f'{html.escape(day)} · r1</strong> · 行情資料日：{html.escape(metadata["market_as_of"])}'
+              f'{html.escape(day)} · r{revision}</strong> · 行情資料日：{html.escape(metadata["market_as_of"])}'
               f' · 產生時間：{html.escape(metadata["generated_at"])}'
               '<br>資料於實際執行時取得；同一正式版本重試沿用相同內容。</aside>')
     files = {}
-    for name in ('analysis.html', 'analysis_param.html', 'analysis_momentum.html', 'index.html'):
+    for name in ('analysis_momentum.html', 'index.html'):
         content = (directory / name).read_text(encoding='utf-8')
         if '<body>' not in content:
             raise ValueError('Report has no body')
@@ -198,15 +217,20 @@ def freeze(store, day, directory=PUBLIC, official=True):
         (directory / name).write_bytes(content)
     (directory / 'generation.json').unlink()
     if official:
-        if day in store.data['reports']:
+        key = day if revision == 1 else f'{day}-r2'
+        if key in store.data['reports']:
             raise ValueError('Cannot overwrite a frozen official report')
-        store.data['reports'][day] = {'files': {name: digest(content) for name, content in files.items()},
-                                    'deployed': False, 'deliveries': {}}
-        store.save({f'reports/{day}/r1/{name}': content for name, content in files.items()})
+        if revision == 2 and day not in store.data['reports']:
+            raise ValueError('Cannot reissue r2 without existing r1')
+        store.data['reports'][key] = {
+            'files': {name: digest(content) for name, content in files.items()},
+            'deployed': False, 'deliveries': {},
+        }
+        store.save({f'reports/{day}/r{revision}/{name}': content for name, content in files.items()})
 
 
 def send_delivery(store, day, recipient, sender):
-    record = store.data['reports'][day]
+    record = store.data['reports'][active_key(store, day)]
     if not record['deployed']:
         raise ValueError('Website must be deployed before sending')
     receipt = delivery(record, recipient)
@@ -258,7 +282,7 @@ def gmail_sender(day, recipient):
         # Temporary files are no longer needed once credentials are in memory.
     return lambda: send_report(
         PUBLIC / 'analysis_momentum.html', recipient,
-        f'Stock analysis report - 評分v2 - {day} - r1', paths[0], paths[1],
+        f'Stock analysis report - 評分v2 - {day} - r{metadata.get("revision", 1)}', paths[0], paths[1],
         non_interactive=True, metadata=metadata, credentials=credentials)
 
 
@@ -276,9 +300,13 @@ def main():
         official = os.environ.get('GITHUB_EVENT_NAME') == 'schedule' or os.environ.get('SEND_EMAIL') == 'true'
         requested = os.environ.get('END_DATE', '').strip()
         early_today = os.environ.get('EARLY_PUBLISH', 'false') == 'true'
+        reissue = os.environ.get('REISSUE_REPORT', 'false') == 'true'
         if early_today and (os.environ.get('GITHUB_EVENT_NAME') != 'workflow_dispatch'
                              or os.environ.get('SEND_EMAIL') != 'true'):
             raise ValueError('Early publication requires manual dispatch with send_email enabled')
+        if reissue and (not early_today or os.environ.get('GITHUB_EVENT_NAME') != 'workflow_dispatch'
+                        or os.environ.get('SEND_EMAIL') != 'true'):
+            raise ValueError('Reissue requires explicit manual early publication')
         if official:
             if os.environ.get('GITHUB_REF') != 'refs/heads/main':
                 raise ValueError('Official publication must run from main')
@@ -291,7 +319,7 @@ def main():
             if stale:
                 values = {'run': False, 'reason': 'Expired run; a fresh schedule will handle latest due date'}
             else:
-                values = plan(store, anchor, recipient, requested, early_today=early_today)
+                values = plan(store, anchor, recipient, requested, early_today=early_today, reissue=reissue)
             if values['run'] and not values['generate']:
                 restore(store, values['report_date'])
         else:
@@ -319,9 +347,9 @@ def main():
     if not eligible:
         raise ValueError('Batch expired while running; next run will process latest due date')
     if args.command == 'freeze':
-        freeze(store, day)
+        freeze(store, day, revision=2 if os.environ.get('REISSUE_REPORT') == 'true' else 1)
     elif args.command == 'deployed':
-        store.data['reports'][day]['deployed'] = True
+        store.data['reports'][active_key(store, day)]['deployed'] = True
         store.save()
     else:
         # Verify the frozen files again immediately before reserving a send attempt.
