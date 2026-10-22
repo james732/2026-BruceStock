@@ -12,7 +12,7 @@ from pathlib import Path
 import sys
 
 import requests
-from main import FinMindClient, TdccClient, TAIPEI_TIMEZONE, API_TOKEN, load_stock_ids, analyze_news_rows, safe_news_link, analyze_price_rows, render_report, ScoreDay
+from main import FinMindClient, TdccClient, TAIPEI_TIMEZONE, API_TOKEN, load_stock_ids, analyze_news_rows, safe_news_link, analyze_price_rows, stock_history_issue, render_report, ScoreDay
 from main import analyze_institutional_rows, analyze_weekly_holdings
 from score_history import render_history
 from finmind_cache import CachedFinMindClient
@@ -271,6 +271,11 @@ def generate(stock_ids, end_date, remote, cache, tdcc, config, now, mode='auto',
         except REMOTE_ERRORS as e:
             prices = []
             warnings.append(symbol + ' 行情資料取得失敗：' + type(e).__name__)
+        issue = stock_history_issue(symbol, prices, as_of)
+        if issue:
+            warnings.append(issue)
+            print(f"::warning title=Stock skipped::{issue}", file=sys.stderr)
+            continue
         try:
             institutions = cache.fetch('TaiwanStockInstitutionalInvestorsBuySell', symbol, start, as_of.isoformat())
         except REMOTE_ERRORS as e:
@@ -316,6 +321,8 @@ def generate(stock_ids, end_date, remote, cache, tdcc, config, now, mode='auto',
         except REMOTE_ERRORS as e:
             news[symbol] = []
             warnings.append(symbol + ' 新聞資料取得失敗：' + type(e).__name__)
+    if not results:
+        raise ValueError("No stocks with enough recent price history to generate a report")
     warnings.extend(cache.warnings)
     return render(results, names, end_date.isoformat(), now.isoformat(timespec='seconds'), config, warnings, news)
 
