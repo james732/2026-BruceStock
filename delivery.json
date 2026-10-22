@@ -94,6 +94,15 @@
         "index.html": "1f2e1ce5f58e5c637aaf65494ce1081a1d59b4b6210b60d694cd239698ff947b",
         "report_metadata.json": "1e76625cc656bdcf1cdaec19ed77f05549f1fd716998dcdeee81ccf83144159b"
       }
+    },
+    "2026-10-22-r2": {
+      "deliveries": {},
+      "deployed": false,
+      "files": {
+        "analysis_momentum.html": "0f71a98799815ccc9ba4cd285998fb7b6a5a88c652d62fd3683d97820424ca30",
+        "index.html": "0f71a98799815ccc9ba4cd285998fb7b6a5a88c652d62fd3683d97820424ca30",
+        "report_metadata.json": "b1497ff2c6631c2032f116db58d9982e4c23f5e08a69c0bf4cbd96c2db901682"
+      }
     }
   },
   "schema": 1,
