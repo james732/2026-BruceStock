@@ -114,7 +114,14 @@
       }
     },
     "2026-10-23": {
-      "deliveries": {},
+      "deliveries": {
+        "7cc2f1e0d698f6d27b55614b3515f5b5cd6e7d14ed97140b52f9f6d09dddfa23": {
+          "attempted_at": "2026-10-23T23:09:16.171604+08:00",
+          "attempts": 1,
+          "run_id": "39975473933",
+          "status": "sending"
+        }
+      },
       "deployed": true,
       "files": {
         "analysis_momentum.html": "39aac662c7298519a7d5bbe60de59254b48c41041e2f349ad61eaf8e9af259d3",
