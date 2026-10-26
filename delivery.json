@@ -172,8 +172,10 @@
         "7cc2f1e0d698f6d27b55614b3515f5b5cd6e7d14ed97140b52f9f6d09dddfa23": {
           "attempted_at": "2026-10-27T01:26:42.346194+08:00",
           "attempts": 1,
+          "message_id": "1a179402060296e0",
           "run_id": "40368280183",
-          "status": "sending"
+          "sent_at": "2026-10-27T01:26:48.985761+08:00",
+          "status": "sent"
         }
       },
       "deployed": true,
