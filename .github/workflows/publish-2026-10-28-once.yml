@@ -1,0 +1,26 @@
+# One-time authenticated dispatch of the existing guarded publication workflow.
+# Do not duplicate the report generation/deployment/delivery implementation here.
+name: One-time report refresh 2026-10-28
+on:
+  push:
+    paths:
+      - .github/workflows/publish-2026-10-28-once.yml
+permissions:
+  contents: read
+  actions: write
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch today's official report using the merged UI fix
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run report.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            --field end_date=2026-10-28 \
+            --field send_email=true \
+            --field publish_today=true \
+            --field recipient=bruce.sy.chen@gmail.com
