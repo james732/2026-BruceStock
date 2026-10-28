@@ -980,6 +980,12 @@ def render_report(
     .meta, .note {{ background: #fff; border: 1px solid #dce1e6; border-radius: 8px; padding: 12px 18px; }}
     .meta {{ line-height: 1.7; }}
     .table-wrap {{ overflow-x: auto; background: #fff; border: 1px solid #dce1e6; border-radius: 8px; }}
+    /* Keep horizontal navigation available while a long stock panel is expanded. */
+    .floating-x-scroll {{ position: fixed; bottom: 0; z-index: 30; height: 20px;
+      overflow-x: auto; overflow-y: hidden; background: #e8eef6;
+      box-shadow: 0 -2px 6px rgba(34, 58, 94, .2); }}
+    .floating-x-scroll[hidden] {{ display: none; }}
+    .floating-x-scroll-spacer {{ height: 1px; }}
     table {{ width: 100%; border-collapse: collapse; white-space: nowrap; font-variant-numeric: tabular-nums; }}
     th, td {{ padding: 9px 11px; border-bottom: 1px solid #e5e9ed; text-align: right; }}
     th {{ position: sticky; top: 0; background: #223a5e; color: #fff; }}
@@ -1138,6 +1144,49 @@ def render_report(
       sortRows(header, direction);
     }});
   }});
+  // Mirror the main table scrollbar at the viewport bottom while its real
+  // scrollbar is below the visible area (for example, inside an expanded stock).
+  if (typeof window !== "undefined" && document.querySelector) {{
+    const overviewScroll = document.querySelector(".table-wrap");
+    if (overviewScroll) {{
+      const floatingScrollbar = document.createElement("div");
+      const scrollbarSpacer = document.createElement("div");
+      floatingScrollbar.className = "floating-x-scroll";
+      floatingScrollbar.hidden = true;
+      floatingScrollbar.tabIndex = 0;
+      floatingScrollbar.setAttribute("aria-label", "總覽表格橫向捲動");
+      scrollbarSpacer.className = "floating-x-scroll-spacer";
+      floatingScrollbar.append(scrollbarSpacer);
+      document.body.append(floatingScrollbar);
+
+      const updateFloatingScrollbar = () => {{
+        const bounds = overviewScroll.getBoundingClientRect();
+        const overflowsHorizontally = overviewScroll.scrollWidth > overviewScroll.clientWidth + 1;
+        // The normal scrollbar is at the wrapper's bottom edge.
+        const bottomIsOffscreen = bounds.top < window.innerHeight && bounds.bottom > window.innerHeight + 1;
+        floatingScrollbar.hidden = !(overflowsHorizontally && bottomIsOffscreen);
+        if (floatingScrollbar.hidden) return;
+        floatingScrollbar.style.left = (bounds.left + overviewScroll.clientLeft) + "px";
+        floatingScrollbar.style.width = overviewScroll.clientWidth + "px";
+        scrollbarSpacer.style.width = overviewScroll.scrollWidth + "px";
+        floatingScrollbar.scrollLeft = overviewScroll.scrollLeft;
+      }};
+
+      overviewScroll.addEventListener("scroll", () => {{
+        floatingScrollbar.scrollLeft = overviewScroll.scrollLeft;
+      }}, {{ passive: true }});
+      floatingScrollbar.addEventListener("scroll", () => {{
+        overviewScroll.scrollLeft = floatingScrollbar.scrollLeft;
+      }}, {{ passive: true }});
+      window.addEventListener("scroll", updateFloatingScrollbar, {{ passive: true }});
+      window.addEventListener("resize", updateFloatingScrollbar);
+      if (typeof ResizeObserver !== "undefined") {{
+        new ResizeObserver(updateFloatingScrollbar).observe(overviewScroll);
+      }}
+      updateFloatingScrollbar();
+    }}
+  }}
+
   {HISTORY_SCRIPT if adjustable_scores else ''}
   {score_script}
 </script>
