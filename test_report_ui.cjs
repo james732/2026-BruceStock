@@ -53,11 +53,55 @@ header.querySelector = () => button;
 overview.querySelectorAll = () => rows;
 const appended = [];
 overview.append = (row, panel) => { assert.equal(panels.get(row.dataset.detailsId), panel); appended.push(row); };
+// Simulate a narrow viewport with an expanded panel whose native
+// horizontal scrollbar is below the bottom of the viewport.
+let wrapperBounds = {top: -100, bottom: 1400, left: 30};
+const scrollContainer = element();
+scrollContainer.scrollWidth = 2700;
+scrollContainer.clientWidth = 900;
+scrollContainer.clientLeft = 1;
+scrollContainer.scrollLeft = 0;
+scrollContainer.getBoundingClientRect = () => wrapperBounds;
+const floatingBars = [];
+const window = {
+  innerHeight: 800, events: {},
+  addEventListener(type, handler) { this.events[type] = handler; },
+};
 const document = {
+  querySelector: selector => selector === '.table-wrap' ? scrollContainer : null,
+  createElement: () => {
+    const item = element();
+    item.append = child => { item.child = child; };
+    return item;
+  },
+  body: {append: item => floatingBars.push(item)},
   querySelectorAll: selector => selector === '.stock-row' ? rows : [header],
   getElementById: id => ({'overview-body': overview, 'score-form': form, 'score-status': status}[id] ?? panels.get(id)),
 };
-vm.runInNewContext(script, {document});
+vm.runInNewContext(script, {document, window});
+const floating = floatingBars[0];
+assert(floating, 'a synchronized scrollbar is mounted');
+assert.equal(floating.hidden, false, 'floating scrollbar is visible above the table bottom');
+assert.equal(floating.style.left, '31px');
+assert.equal(floating.style.width, '900px');
+assert.equal(floating.child.style.width, '2700px');
+scrollContainer.scrollLeft = 450;
+scrollContainer.events.scroll();
+assert.equal(floating.scrollLeft, 450, 'main table scroll updates floating bar');
+floating.scrollLeft = 800;
+floating.events.scroll();
+assert.equal(scrollContainer.scrollLeft, 800, 'floating bar scroll updates main table');
+wrapperBounds = {...wrapperBounds, bottom: 700};
+window.events.scroll();
+assert.equal(floating.hidden, true, 'hide when native scrollbar enters viewport');
+wrapperBounds = {...wrapperBounds, bottom: 1400};
+scrollContainer.scrollWidth = 900;
+window.events.resize();
+assert.equal(floating.hidden, true, 'hide when the table fits the viewport');
+scrollContainer.scrollWidth = 2700;
+window.events.resize();
+assert.equal(floating.hidden, false);
+
 const calc = (conditions, values) => Math.min(100, 100 + Object.entries(values).reduce((sum, [key, value]) => sum + (conditions[key] ? value : 0), 0));
 function verify(values) {
   for (const row of rows) {
