@@ -1,0 +1,17 @@
+{
+  "content_sha256": "ab042864f2542db4daa485aa7101933c678fcf18d1ea1cf0d699758841090863",
+  "data_observed_at": "2026-10-31T20:37:24+08:00",
+  "generated_at": "2026-10-31T20:37:20+08:00",
+  "html_sha256": {
+    "analysis_momentum.html": "540b265901e684e13b29b0c30eae971676e44492a823acd2aa6f4cbb99cb5993",
+    "index.html": "540b265901e684e13b29b0c30eae971676e44492a823acd2aa6f4cbb99cb5993"
+  },
+  "market_as_of": "2026-10-30",
+  "mode": "daily",
+  "official": true,
+  "report_date": "2026-10-31",
+  "revision": 1,
+  "run_id": "41201914078",
+  "scheduled_for": "2026-10-31T20:18:00+08:00",
+  "source_sha": "4c0d619c80416592e898b247d5ccd40df69ca5ae"
+}
