@@ -259,7 +259,7 @@
     },
     "2026-10-31": {
       "deliveries": {},
-      "deployed": false,
+      "deployed": true,
       "files": {
         "analysis_momentum.html": "540b265901e684e13b29b0c30eae971676e44492a823acd2aa6f4cbb99cb5993",
         "index.html": "540b265901e684e13b29b0c30eae971676e44492a823acd2aa6f4cbb99cb5993",
