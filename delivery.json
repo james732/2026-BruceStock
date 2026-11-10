@@ -442,8 +442,10 @@
         "7cc2f1e0d698f6d27b55614b3515f5b5cd6e7d14ed97140b52f9f6d09dddfa23": {
           "attempted_at": "2026-11-11T00:28:51.126295+08:00",
           "attempts": 1,
+          "message_id": "1a1c64a9372749f5",
           "run_id": "42854590884",
-          "status": "sending"
+          "sent_at": "2026-11-11T00:28:58.977382+08:00",
+          "status": "sent"
         }
       },
       "deployed": true,
