@@ -1,0 +1,17 @@
+{
+  "content_sha256": "b48d35fabeee5e6a0f28088736ff546b5f15a4c51a8b9dd4f5a80c85c13ad392",
+  "data_observed_at": "2026-11-14T22:11:07+08:00",
+  "generated_at": "2026-11-14T22:10:55+08:00",
+  "html_sha256": {
+    "analysis_momentum.html": "0d3e559bb93926bd32c36aaee497049ba958514ad1514fbdb56a3a47f1be5feb",
+    "index.html": "0d3e559bb93926bd32c36aaee497049ba958514ad1514fbdb56a3a47f1be5feb"
+  },
+  "market_as_of": "2026-11-13",
+  "mode": "daily",
+  "official": true,
+  "report_date": "2026-11-14",
+  "revision": 1,
+  "run_id": "43603497321",
+  "scheduled_for": "2026-11-14T20:18:00+08:00",
+  "source_sha": "4c0d619c80416592e898b247d5ccd40df69ca5ae"
+}
