@@ -519,7 +519,14 @@
       }
     },
     "2026-11-16": {
-      "deliveries": {},
+      "deliveries": {
+        "7cc2f1e0d698f6d27b55614b3515f5b5cd6e7d14ed97140b52f9f6d09dddfa23": {
+          "attempted_at": "2026-11-17T15:57:57.763762+08:00",
+          "attempts": 1,
+          "run_id": "44042725694",
+          "status": "sending"
+        }
+      },
       "deployed": true,
       "files": {
         "analysis_momentum.html": "257514da9f6913614dc5d55f4d4232a46219bdfb8e6cecb9a9ef60e0964ba534",
