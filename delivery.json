@@ -589,6 +589,15 @@
         "index.html": "029fd2726111f90c0aab9acd6183a32942eda26458dbd31fc674367ee3a638d6",
         "report_metadata.json": "3a67243176320d1c5d337ce49d012e66e20e0de39553177ff539d492ee9ddc10"
       }
+    },
+    "2026-11-20": {
+      "deliveries": {},
+      "deployed": false,
+      "files": {
+        "analysis_momentum.html": "2836c2ab4c871275b1146f41ab9ea844b0d971be52f958ae3d1ac51f88fd51ff",
+        "index.html": "2836c2ab4c871275b1146f41ab9ea844b0d971be52f958ae3d1ac51f88fd51ff",
+        "report_metadata.json": "f41b87c8b7e301dda4926c7f0a400c0fd2288c5e2baa5652903ffa0ab2df1087"
+      }
     }
   },
   "schema": 1,
