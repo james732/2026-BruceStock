@@ -646,7 +646,7 @@
     },
     "2026-11-23": {
       "deliveries": {},
-      "deployed": false,
+      "deployed": true,
       "files": {
         "analysis_momentum.html": "c9903919fad60c8ae673bebf1e91635d5ad5a9587d9d3501e9187c54b9b27ac2",
         "index.html": "c9903919fad60c8ae673bebf1e91635d5ad5a9587d9d3501e9187c54b9b27ac2",
