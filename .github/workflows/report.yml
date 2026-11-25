@@ -123,14 +123,49 @@ jobs:
           retention-days: 30
           if-no-files-found: error
       - name: Package website
+        id: pages_artifact
         if: steps.plan.outputs.deploy == 'true'
         uses: actions/upload-pages-artifact@v3
         with:
+          name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
           path: public/
+      # The upload can finish before the artifact listing is consistent.
+      # See actions/deploy-pages#451. Check the exact artifact from this attempt.
+      - name: Wait for Pages artifact visibility
+        if: steps.plan.outputs.deploy == 'true'
+        timeout-minutes: 4
+        env:
+          PAGES_ARTIFACT_ID: ${{ steps.pages_artifact.outputs.artifact_id }}
+          PAGES_ARTIFACT_NAME: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$PAGES_ARTIFACT_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::Pages upload did not return a valid artifact ID"
+            exit 1
+          fi
+          for delay in 0 5 10 15 20 30 30; do
+            sleep "$delay"
+            if gh api --method GET "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" \
+              -f name="$PAGES_ARTIFACT_NAME" | jq -e \
+              --arg id "$PAGES_ARTIFACT_ID" --arg name "$PAGES_ARTIFACT_NAME" \
+              'any(.artifacts[]?; (.id | tostring) == $id and .name == $name and .expired == false and .size_in_bytes > 0)' >/dev/null; then
+              echo "Pages artifact $PAGES_ARTIFACT_ID is visible in the REST API"
+              # deploy-pages uses the internal artifact service, not the REST API.
+              # Allow additional time for that service to observe the upload.
+              sleep 10
+              exit 0
+            fi
+            echo "Pages artifact not visible yet; retrying"
+          done
+          echo "::error::Pages artifact did not become visible; the frozen report will be retried by the next scheduled run"
+          exit 1
       - name: Deploy frozen HTML
         id: deployment
         if: steps.plan.outputs.deploy == 'true'
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Checkpoint deployment
         if: steps.plan.outputs.deploy == 'true'
         env:
