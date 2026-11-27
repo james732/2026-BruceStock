@@ -715,6 +715,15 @@
         "index.html": "50426b3c9b69d40168b2c1114110693d1ee0664360445ef2c24ef8f06a96b1f6",
         "report_metadata.json": "0c2407982e8864a450aa6c2dcb91c16a97c8c5e9e3f10f9f0b3f0b341dd00705"
       }
+    },
+    "2026-11-27": {
+      "deliveries": {},
+      "deployed": false,
+      "files": {
+        "analysis_momentum.html": "a1e6891230fec1a9610dc33571a90f109ebca0ad1d526446e2b19ea949c9455c",
+        "index.html": "a1e6891230fec1a9610dc33571a90f109ebca0ad1d526446e2b19ea949c9455c",
+        "report_metadata.json": "2fe98bed4a324a5d751b928bebef32992c52f3315f581718b91d99a4dc031618"
+      }
     }
   },
   "schema": 1,
